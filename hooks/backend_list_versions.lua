@@ -25,11 +25,11 @@ function PLUGIN:BackendListVersions(ctx)
     local cmd = require("cmd")
 
     -- Replace with your backend's command to list versions
-    local command = krew_cmd .. " update " .. " && " .. krew_cmd .. " info " .. tool
+    local command = krew_cmd .. " update " .. " && " .. krew_cmd .. " info " .. tool .. " || true"
     local result = cmd.exec(command)
 
-    if result:match("not found") then
-        error("Failed to fetch versions for " .. tool)
+    if result == "" or result:match("not found") then
+        error("Failed to fetch versions for '" .. tool .. "'. Does the package exist?")
     end
 
     local versions = {}
