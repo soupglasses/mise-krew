@@ -7,6 +7,7 @@ hk = "latest"
 lua = "5.4"
 pkl = "latest"
 stylua = "latest"
+"aqua:kubernetes-sigs/krew" = "latest"
 
 [tasks.format]
 description = "Format Lua scripts"
