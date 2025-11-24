@@ -7,6 +7,10 @@ function PLUGIN:BackendInstall(ctx)
     local version = ctx.version
     local install_path = ctx.install_path
 
+    local file = require("file")
+    local krew_root = file.join_path(RUNTIME.pluginDirPath, "root")
+    local krew_cmd = "KREW_ROOT=" .. krew_root .. " krew"
+
     -- Validate inputs
     if not tool or tool == "" then
         error("Tool name cannot be empty")
@@ -21,15 +25,27 @@ function PLUGIN:BackendInstall(ctx)
     -- Create installation directory
     local cmd = require("cmd")
     cmd.exec("mkdir -p " .. install_path)
+    cmd.exec("mkdir -p " .. krew_root)
 
     -- Example implementations (choose/modify based on your backend):
 
     -- Example 1: Package manager installation (like npm, pip)
-    local install_cmd = "<BACKEND> install " .. tool .. "@" .. version .. " --target " .. install_path
+    local install_cmd = krew_cmd .. " install " .. tool
     local result = cmd.exec(install_cmd)
 
-    if result:match("error") or result:match("failed") then
-        error("Failed to install " .. tool .. "@" .. version .. ": " .. result)
+    if result:match("does not exist") then
+        error("Failed to install " .. tool .. ": " .. result)
+    end
+
+    -- Assume all krew binaries are 1-1 named and kubectl extensions.
+    local target = "kubectl-" .. tool:gsub("-", "_")
+    local source_path = file.join_path(krew_root, "bin", target)
+    local target_path = file.join_path(install_path, target)
+    local symlink_cmd = string.format("ln -s %s %s", source_path, target_path)
+    local result2 = cmd.exec(symlink_cmd)
+
+    if result2:match("failed") then
+        error("Failed to install " .. tool .. ": " .. result2)
     end
 
     -- Example 2: Download and extract from URL

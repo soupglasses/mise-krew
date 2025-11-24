@@ -5,6 +5,10 @@
 function PLUGIN:BackendListVersions(ctx)
     local tool = ctx.tool
 
+    local file = require("file")
+    local krew_root = file.join_path(RUNTIME.pluginDirPath, "root")
+    local krew_cmd = "KREW_ROOT=" .. krew_root .. " krew"
+
     -- Validate tool name
     if not tool or tool == "" then
         error("Tool name cannot be empty")
@@ -13,6 +17,7 @@ function PLUGIN:BackendListVersions(ctx)
     -- Example implementations (choose/modify based on your backend):
 
     -- Example 1: API-based version listing (like npm, pip, cargo)
+    --[[
     local http = require("http")
     local json = require("json")
 
@@ -41,25 +46,25 @@ function PLUGIN:BackendListVersions(ctx)
             table.insert(versions, version)
         end
     end
+    --]]
 
     -- Example 2: Command-line based version listing
-    --[[
     local cmd = require("cmd")
 
     -- Replace with your backend's command to list versions
-    local command = "<BACKEND> search " .. tool .. " --versions"
+    local command = krew_cmd .. " update " .. " && " .. krew_cmd .. " info " .. tool
     local result = cmd.exec(command)
 
-    if not result or result:match("error") then
+    if result:match("not found") then
         error("Failed to fetch versions for " .. tool)
     end
 
     local versions = {}
     -- Parse command output to extract versions
-    for version in result:gmatch("[%d%.]+[%w%-]*") do
+    -- VERSION: v1.3.0
+    for version in result:gmatch("VERSION: (v?[%d%.]+[%w%-]*)") do
         table.insert(versions, version)
     end
-    --]]
 
     -- Example 3: Registry file parsing
     --[[

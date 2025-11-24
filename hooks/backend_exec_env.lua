@@ -7,13 +7,9 @@ function PLUGIN:BackendExecEnv(ctx)
     local tool = ctx.tool
     local version = ctx.version
 
-    -- Basic PATH setup (most common case)
-    local file = require("file")
-    local bin_path = file.join_path(install_path, "bin")
-
     local env_vars = {
         -- Add tool's bin directory to PATH
-        { key = "PATH", value = bin_path },
+        { key = "PATH", value = install_path },
     }
 
     -- Example: Tool-specific environment variables

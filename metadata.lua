@@ -4,19 +4,19 @@
 
 PLUGIN = { -- luacheck: ignore
     -- Required: Plugin name (will be the backend name users reference)
-    name = "<BACKEND>",
+    name = "krew",
 
     -- Required: Plugin version (not the tool versions)
     version = "1.0.0",
 
     -- Required: Brief description of the backend and tools it manages
-    description = "A mise backend plugin for <BACKEND> tools",
+    description = "A mise backend plugin for krew tools",
 
     -- Required: Plugin author/maintainer
-    author = "<GITHUB_USER>",
+    author = "soupglasses",
 
     -- Optional: Plugin homepage/repository URL
-    homepage = "https://github.com/<GITHUB_USER>/<BACKEND>",
+    homepage = "https://github.com/soupglasses/mise-krew",
 
     -- Optional: Plugin license
     license = "MIT",
