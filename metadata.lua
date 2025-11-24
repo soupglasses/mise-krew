@@ -7,7 +7,7 @@ PLUGIN = { -- luacheck: ignore
     name = "krew",
 
     -- Required: Plugin version (not the tool versions)
-    version = "1.0.0",
+    version = "1.0.1",
 
     -- Required: Brief description of the backend and tools it manages
     description = "A mise backend plugin for krew tools",
