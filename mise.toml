@@ -1,0 +1,21 @@
+[env]
+MISE_USE_VERSIONS_HOST = "0"
+
+[tools]
+actionlint = "latest"
+hk = "latest"
+lua = "5.4"
+pkl = "latest"
+stylua = "latest"
+
+[tasks.format]
+description = "Format Lua scripts"
+run = "stylua metadata.lua hooks/"
+
+[tasks.lint]
+description = "Lint Lua scripts and GitHub Actions using hk"
+run = "hk check"
+
+[tasks.ci]
+description = "Run all CI checks"
+depends = ["lint", "test"]
