@@ -8,8 +8,15 @@ function PLUGIN:BackendInstall(ctx)
     local install_path = ctx.install_path
 
     local file = require("file")
+    local helper = require("helper")
+
     local krew_root = file.join_path(RUNTIME.pluginDirPath, "root")
     local krew_cmd = "KREW_ROOT=" .. krew_root .. " krew"
+
+    -- Ensure krew is on PATH
+    if not helper.command_exists("krew") then
+        error("krew command 'krew' not found in PATH")
+    end
 
     -- Validate inputs
     if not tool or tool == "" then

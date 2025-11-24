@@ -6,8 +6,15 @@ function PLUGIN:BackendListVersions(ctx)
     local tool = ctx.tool
 
     local file = require("file")
+    local helper = require("helper")
+
     local krew_root = file.join_path(RUNTIME.pluginDirPath, "root")
     local krew_cmd = "KREW_ROOT=" .. krew_root .. " krew"
+
+    -- Ensure krew is on PATH
+    if not helper.command_exists("krew") then
+        error("krew command 'krew' not found in PATH")
+    end
 
     -- Validate tool name
     if not tool or tool == "" then
