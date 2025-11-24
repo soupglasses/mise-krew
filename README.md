@@ -8,6 +8,17 @@ A mise backend plugin for krew tools using the vfox-style backend architecture.
 mise plugin install krew https://github.com/soupglasses/mise-krew
 ```
 
+## Usage
+
+Example usage using `kubectl-volsync`:
+
+```bash
+mise use krew:volsync
+kubectl-volsync --version
+# also accessible through kubectl
+kubectl volsync --version
+```
+
 ## What are Backend Plugins?
 
 Backend plugins in mise extend the standard tool plugin system to manage **multiple tools** using the `plugin:tool` format. They're perfect for:
