@@ -40,4 +40,3 @@ else
 fi
 
 echo "✓ Basic plugin structure tests completed"
-echo "Note: Replace <TEST_TOOL> with a real tool and implement the backend methods"
