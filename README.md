@@ -1,6 +1,6 @@
 # mise-krew
 
-A mise backend plugin using the vfox-style backend architecture.
+A mise backend plugin for krew tools using the vfox-style backend architecture.
 
 ## Install
 
