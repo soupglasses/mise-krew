@@ -4,7 +4,7 @@
 
 PLUGIN = { -- luacheck: ignore
     name = "krew",
-    version = "1.0.1",
+    version = "1.0.2",
     description = "A mise backend plugin for krew tools",
     author = "soupglasses",
     homepage = "https://github.com/soupglasses/mise-krew",
