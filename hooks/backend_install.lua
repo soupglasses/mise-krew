@@ -31,21 +31,21 @@ function PLUGIN:BackendInstall(ctx)
 
     -- Example 1: Package manager installation (like npm, pip)
     local install_cmd = krew_cmd .. " install " .. tool
-    local result = cmd.exec(install_cmd)
+    local result_1 = cmd.exec(install_cmd)
 
-    if result:match("does not exist") then
-        error("Failed to install " .. tool .. ": " .. result)
+    if result_1:match("does not exist") then
+        error("Failed to install " .. tool .. ": " .. result_1)
     end
 
     -- Assume all krew binaries are 1-1 named and kubectl extensions.
     local target = "kubectl-" .. tool:gsub("-", "_")
     local source_path = file.join_path(krew_root, "bin", target)
     local target_path = file.join_path(install_path, target)
-    local symlink_cmd = string.format("ln -s %s %s", source_path, target_path)
-    local result2 = cmd.exec(symlink_cmd)
+    local copy_cmd = string.format("cp %s %s", source_path, target_path)
+    local result_2 = cmd.exec(copy_cmd)
 
-    if result2:match("failed") then
-        error("Failed to install " .. tool .. ": " .. result2)
+    if result_2:match("failed") then
+        error("Failed to install " .. tool .. ": " .. result_2)
     end
 
     -- Example 2: Download and extract from URL
