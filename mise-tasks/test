@@ -18,25 +18,28 @@ TEST_TOOL="browse-pvc"
 TEST_BINARY_TOOL="kubectl-${TEST_TOOL//-/_}"
 
 echo "Testing version listing for ${TEST_TOOL}..."
-if mise ls-remote krew:${TEST_TOOL} 2>/dev/null; then
+if mise ls-remote krew:${TEST_TOOL}; then
   echo "✓ Version listing works"
 else
   echo "⚠ Version listing failed - implement backend_list_versions.lua for your backend"
+  exit 1
 fi
 
 # Test installation if versions are available
 echo "Testing installation..."
-if mise install krew:${TEST_TOOL}@latest 2>/dev/null; then
+if mise install krew:${TEST_TOOL}@latest; then
   echo "✓ Installation works"
 
   # Test that the tool can be executed
-  if mise exec krew:${TEST_TOOL}@latest -- ${TEST_BINARY_TOOL} --version 2>/dev/null; then
+  if mise exec krew:${TEST_TOOL}@latest -- ${TEST_BINARY_TOOL} --version; then
     echo "✓ Tool execution works"
   else
     echo "⚠ Tool execution failed - check backend_exec_env.lua implementation"
+    exit 1
   fi
 else
   echo "⚠ Installation failed - implement backend_install.lua for your backend"
+  exit 1
 fi
 
 echo "✓ Basic plugin structure tests completed"
