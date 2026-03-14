@@ -1,24 +1,13 @@
--- hooks/backend_install.lua
--- Installs a specific version of a tool
--- Documentation: https://mise.jdx.dev/backend-plugin-development.html#backendinstall
-
 function PLUGIN:BackendInstall(ctx)
     local tool = ctx.tool
     local version = ctx.version
     local install_path = ctx.install_path
 
-    local file = require("file")
-    local helper = require("helper")
+    local registry = require("registry")
+    local version_index = require("version_index")
+    local manifest_parser = require("manifest")
+    local installer = require("installer")
 
-    local krew_root = file.join_path(RUNTIME.pluginDirPath, "root")
-    local krew_cmd = "KREW_ROOT=" .. krew_root .. " krew"
-
-    -- Ensure krew is on PATH
-    if not helper.command_exists("krew") then
-        error("krew command 'krew' not found in PATH")
-    end
-
-    -- Validate inputs
     if not tool or tool == "" then
         error("Tool name cannot be empty")
     end
@@ -29,28 +18,45 @@ function PLUGIN:BackendInstall(ctx)
         error("Install path cannot be empty")
     end
 
-    -- Create installation directory
-    local cmd = require("cmd")
-    cmd.exec("mkdir -p " .. install_path)
-    cmd.exec("mkdir -p " .. krew_root)
-
-    -- Install implementation using krew backend
-    local install_cmd = krew_cmd .. " install " .. tool
-    local result_1 = cmd.exec(install_cmd)
-
-    if result_1:match("does not exist") then
-        error("Failed to install " .. tool .. ": " .. result_1)
+    local registry_ok, registry_err = registry.ensure_fresh()
+    if not registry_ok then
+        error("Failed to ensure registry: " .. tostring(registry_err))
     end
 
-    -- Assume all krew binaries are 1-1 named and kubectl extensions.
-    local target = "kubectl-" .. tool:gsub("-", "_")
-    local source_path = file.join_path(krew_root, "bin", target)
-    local target_path = file.join_path(install_path, target)
-    local copy_cmd = string.format("cp %s %s", source_path, target_path)
-    local result_2 = cmd.exec(copy_cmd)
+    local resolved_version, commit_hash = version_index.resolve_version(tool, version)
+    if not resolved_version then
+        error("Failed to resolve version '" .. version .. "' for tool '" .. tool .. "': " .. tostring(commit_hash))
+    end
 
-    if result_2:match("failed") then
-        error("Failed to install " .. tool .. ": " .. result_2)
+    local yaml_str, manifest_err = registry.get_manifest_at_commit(tool, commit_hash)
+    if not yaml_str then
+        error(
+            "Failed to get manifest for "
+                .. tool
+                .. " at version "
+                .. resolved_version
+                .. ": "
+                .. tostring(manifest_err)
+        )
+    end
+
+    local manifest, parse_err = manifest_parser.parse(yaml_str)
+    if not manifest then
+        error("Failed to parse manifest: " .. tostring(parse_err))
+    end
+
+    local platform, platform_err = manifest_parser.select_platform(manifest, RUNTIME.osType, RUNTIME.archType)
+    if not platform then
+        error(
+            "No platform available for " .. RUNTIME.osType .. "/" .. RUNTIME.archType .. ": " .. tostring(platform_err)
+        )
+    end
+
+    os.execute("mkdir -p " .. install_path)
+
+    local install_ok, install_err = installer.install(platform, install_path)
+    if not install_ok then
+        error("Installation failed: " .. tostring(install_err))
     end
 
     return {}

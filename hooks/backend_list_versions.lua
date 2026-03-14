@@ -1,42 +1,15 @@
--- hooks/backend_list_versions.lua
--- Lists available versions for a tool in this backend
--- Documentation: https://mise.jdx.dev/backend-plugin-development.html#backendlistversions
-
 function PLUGIN:BackendListVersions(ctx)
     local tool = ctx.tool
 
-    local file = require("file")
-    local helper = require("helper")
-
-    local krew_root = file.join_path(RUNTIME.pluginDirPath, "root")
-    local krew_cmd = "KREW_ROOT=" .. krew_root .. " krew"
-
-    -- Ensure krew is on PATH
-    if not helper.command_exists("krew") then
-        error("krew command 'krew' not found in PATH")
-    end
-
-    -- Validate tool name
     if not tool or tool == "" then
         error("Tool name cannot be empty")
     end
 
-    -- Command-line based version listing
-    local cmd = require("cmd")
+    local version_index = require("version_index")
 
-    -- Replace with your backend's command to list versions
-    local command = krew_cmd .. " update " .. " && " .. krew_cmd .. " info " .. tool .. " || true"
-    local result = cmd.exec(command)
-
-    if result == "" or result:match("not found") then
-        error("Failed to fetch versions for '" .. tool .. "'. Does the package exist?")
-    end
-
-    local versions = {}
-    -- Parse command output to extract versions
-    -- VERSION: v1.3.0
-    for version in result:gmatch("VERSION: (v?[%d%.]+[%w%-]*)") do
-        table.insert(versions, version)
+    local versions, err = version_index.get_versions(tool)
+    if not versions then
+        error("Failed to get versions for '" .. tool .. "': " .. tostring(err))
     end
 
     if #versions == 0 then

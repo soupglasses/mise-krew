@@ -14,8 +14,8 @@ echo "Testing plugin linking and basic functionality..."
 # Try to list available versions for a test tool
 # Note: This will likely fail until you implement the backend methods
 # Replace <TEST_TOOL> with a real tool name your backend supports
-TEST_TOOL="browse-pvc"
-TEST_BINARY_TOOL="kubectl-${TEST_TOOL//-/_}"
+TEST_TOOL="tree"
+TEST_BINARY_TOOL="kubectl-tree"
 
 echo "Testing version listing for ${TEST_TOOL}..."
 if mise ls-remote krew:${TEST_TOOL}; then

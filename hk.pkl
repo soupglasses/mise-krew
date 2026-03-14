@@ -4,7 +4,7 @@ import "package://github.com/jdx/hk/releases/download/v1.2.0/hk@1.2.0#/Builtins.
 local linters = new Mapping<String, Step> {
     ["luacheck"] {
         glob = "**/*.lua"
-        check = "luarocks install luacheck --local || true && ~/.luarocks/bin/luacheck {{files}}"
+        check = "luacheck {{files}}"
     }
     ["stylua"] {
         glob = "**/*.lua"

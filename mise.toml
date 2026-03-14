@@ -1,5 +1,6 @@
 [env]
 MISE_USE_VERSIONS_HOST = "0"
+_.path = ["~/.luarocks/bin"]
 
 [tools]
 actionlint = "latest"
@@ -17,6 +18,10 @@ run = "stylua metadata.lua hooks/"
 description = "Lint Lua scripts and GitHub Actions using hk"
 run = "hk check"
 
+[tasks.unit-test]
+description = "Run Lua unit tests"
+run = "lua tests/run_tests.lua"
+
 [tasks.ci]
 description = "Run all CI checks"
-depends = ["lint", "test"]
+depends = ["lint", "unit-test", "test"]
