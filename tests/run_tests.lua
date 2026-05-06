@@ -55,8 +55,15 @@ if not ok then
     os.exit(1)
 end
 
+local ok_inst, test_installer = pcall(require, "test_installer")
+if not ok_inst then
+    print("Failed to load test_installer:", test_installer)
+    os.exit(1)
+end
+
 -- Run all tests
 local success = test_manifest.run_all()
+success = test_installer.run_all() and success
 
 if success then
     print("\nAll tests passed!")

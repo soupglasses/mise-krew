@@ -75,6 +75,20 @@ echo "------------------------------------------"
 
 run_test "Can execute installed tool" "mise exec krew:tree@latest -- kubectl-tree --version | grep -q 'v0.4'"
 
+# Test 5: Hyphen-to-underscore rename for plugins with hyphenated names
+echo ""
+echo "------------------------------------------"
+echo "Test Suite: Hyphenated Plugin Rename"
+echo "------------------------------------------"
+
+rm -rf ~/.local/share/mise/installs/krew-browse-pvc/
+
+run_test "Install browse-pvc@latest" "mise install krew:browse-pvc@latest"
+
+BPVC_INSTALL=$(mise where krew:browse-pvc@latest 2>/dev/null || echo "")
+run_test "Renamed binary exists" "test -f '${BPVC_INSTALL}/kubectl-browse_pvc'"
+run_test "Original hyphen-named binary is gone" "test ! -f '${BPVC_INSTALL}/kubectl-browse-pvc'"
+
 # Summary
 echo ""
 echo "=========================================="
