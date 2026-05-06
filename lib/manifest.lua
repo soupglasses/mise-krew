@@ -9,7 +9,7 @@ local M = {}
 function M.parse(yaml_str)
     local yaml = require("yaml")
 
-    local ok, result = pcall(yaml.eval, yaml_str)
+    local ok, result = pcall(yaml.parse, yaml_str)
     if not ok then
         return nil, "Failed to parse manifest: " .. tostring(result)
     end

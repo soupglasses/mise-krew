@@ -104,8 +104,7 @@ function M.get_file_history(plugin_name)
     local registry_path = M.get_registry_path()
 
     local plugin_path = "plugins/" .. plugin_name .. ".yaml"
-    local log_cmd =
-        string.format("git --no-pager log --format=%%H --no-show-signature --follow -- %s 2>/dev/null", plugin_path)
+    local log_cmd = string.format("git --no-pager log --format=%%H --no-show-signature -- %s 2>/dev/null", plugin_path)
 
     local result = cmd.exec(log_cmd, { cwd = registry_path })
 
@@ -136,10 +135,9 @@ function M.get_manifest_at_commit(plugin_name, commit_hash)
     local plugin_path = "plugins/" .. plugin_name .. ".yaml"
     local show_cmd = string.format("git show %s:%s", commit_hash, plugin_path)
 
-    local result = cmd.exec(show_cmd, { cwd = registry_path })
-
-    if result:match("fatal") or result:match("error") then
-        return nil, "Failed to get manifest at commit " .. commit_hash
+    local ok, result = pcall(cmd.exec, show_cmd, { cwd = registry_path })
+    if not ok then
+        return nil, "Failed to get manifest at commit " .. commit_hash .. ": " .. tostring(result)
     end
 
     return result, nil

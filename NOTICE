@@ -3,16 +3,16 @@ Third-Party Licenses
 
 This project includes code from third-party libraries:
 
-lua-yaml
---------
-Copyright (c) 2017 Dominic Letz <dominicletz@exosite.com>
+lua-tinyyaml
+------------
+Copyright (c) 2017 peposso
 
-Source: https://github.com/exosite/lua-yaml
+Source: https://github.com/zepinglee/lua-tinyyaml
 License: MIT
 
 The MIT License (MIT)
 
-Copyright (c) 2017 Dominic Letz
+Copyright (c) 2017 peposso
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

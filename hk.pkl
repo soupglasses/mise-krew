@@ -8,8 +8,8 @@ local linters = new Mapping<String, Step> {
     }
     ["stylua"] {
         glob = "**/*.lua"
-        check = "stylua --check {{files}}"
-        fix = "stylua {{files}}"
+        check = "stylua --respect-ignores --check {{files}}"
+        fix = "stylua --respect-ignores {{files}}"
     }
     ["actionlint"] {
         glob = ".github/workflows/*.{yml,yaml}"

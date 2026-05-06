@@ -56,6 +56,14 @@ BPVC_INSTALL=$(mise where krew:browse-pvc@latest)
 check "hyphenated plugin renamed to underscores"  "test -f '${BPVC_INSTALL}/kubectl-browse_pvc'"
 check "original hyphen-named binary removed"      "test ! -f '${BPVC_INSTALL}/kubectl-browse-pvc'"
 
+# Regression coverage:
+#   #6: oidc-login, get-all, deprecations, df-pv, access-matrix, cilium-policy-gen
+#   #7: rook-ceph
+for t in oidc-login get-all deprecations df-pv access-matrix cilium-policy-gen rook-ceph; do
+    clean_tool "$t"
+    check "install krew:$t@latest" "mise install krew:$t@latest"
+done
+
 if [ $FAILED -eq 0 ]; then
     printf "%s%d passed%s\n" "$GREEN" "$PASSED" "$NC"
     exit 0
