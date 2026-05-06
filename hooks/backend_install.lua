@@ -61,7 +61,7 @@ function PLUGIN:BackendInstall(ctx)
 
     local file = require("file")
     local source = platform.bin and platform.bin:match("[^/]+$")
-    local target = source and installer.target_bin_name(tool, ctx.options)
+    local target = source and installer.target_bin_name(tool)
     if source and source ~= target then
         local from = file.join_path(install_path, source)
         if file.exists(from) then
