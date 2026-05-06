@@ -50,3 +50,7 @@ allow_defined_top = true
 -- Don't warn about unused arguments in hook functions
 -- These are part of the plugin API signature
 unused_args = false
+
+exclude_files = {
+    "lib/yaml.lua", -- vendored third-party (lua-tinyyaml)
+}
