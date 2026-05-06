@@ -59,5 +59,15 @@ function PLUGIN:BackendInstall(ctx)
         error("Installation failed: " .. tostring(install_err))
     end
 
+    local file = require("file")
+    local source = platform.bin and platform.bin:match("[^/]+$")
+    local target = source and installer.target_bin_name(tool, ctx.options)
+    if source and source ~= target then
+        local from = file.join_path(install_path, source)
+        if file.exists(from) then
+            os.rename(from, file.join_path(install_path, target))
+        end
+    end
+
     return {}
 end
