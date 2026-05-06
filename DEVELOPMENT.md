@@ -192,6 +192,10 @@ mise cache clear
 - 4 spaces, 120 column width
 - Run `stylua` before committing (or use `hk install` for auto-format)
 
+## Commit Messages
+
+Commits follow the [Conventional Commits](https://www.conventionalcommits.org) format (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, `ci:`).
+
 ## Releasing
 
 1. Ensure CI passes: `mise run test`
