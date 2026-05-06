@@ -7,6 +7,16 @@ local function basename(path)
     return path:match("[^/]+$") or path
 end
 
+-- kubectl invokes `foo-bar` plugins as `kubectl foo bar` unless the binary is
+-- named with underscores. Mirrors krew's pluginNameToBin.
+function M.target_bin_name(tool, opts)
+    local override = opts and opts.rename_exe
+    if override and override ~= "" then
+        return override
+    end
+    return "kubectl-" .. tool:gsub("-", "_")
+end
+
 local function get_filename_from_url(url)
     local filename = url:match("[^/]+$")
     if filename then
