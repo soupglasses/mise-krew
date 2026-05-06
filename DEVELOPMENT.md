@@ -44,18 +44,10 @@ mise exec krew:tree@latest -- kubectl-tree --version
 ### Running Tests
 
 ```bash
-# Unit tests
-lua tests/run_tests.lua
-
-# Linting (via mise, runs hk internally)
-mise run lint
-
-# Or directly with hk
-hk check        # check formatting
-hk fix          # auto-fix issues
-
-# Full CI suite
-mise run ci
+mise run test-unit          # Lua unit tests
+mise run test-integration   # End-to-end against the linked plugin
+mise run lint               # stylua + luacheck via hk
+mise run test               # All of the above
 ```
 
 ### Testing Your Changes
@@ -69,7 +61,7 @@ mise run ci
    ```
 
 3. Test the specific functionality you changed
-4. Run full test suite: `mise run ci`
+4. Run full test suite: `mise run test`
 
 ### Available Lua Modules
 
@@ -102,8 +94,11 @@ See [mise plugin Lua modules docs](https://mise.jdx.dev/plugin-lua-modules.html)
 │   ├── version_index.lua           # Version extraction/caching
 │   └── installer.lua               # Download/extract/install
 ├── tests/
-│   ├── run_tests.lua               # Test runner
-│   ├── test_manifest.lua           # Unit tests
+│   ├── framework.lua               # Shared assertions + suite runner
+│   ├── run_tests.lua               # Lua unit-test entrypoint
+│   ├── test_manifest.lua           # Manifest parser unit tests
+│   ├── test_installer.lua          # Installer unit tests
+│   ├── integration_test.sh         # End-to-end integration tests
 │   └── fixtures/                   # Test manifests
 ├── metadata.lua                    # Plugin metadata
 ├── mise.toml                       # Dev tasks & tool versions
@@ -199,7 +194,7 @@ mise cache clear
 
 ## Releasing
 
-1. Ensure CI passes: `mise run ci`
+1. Ensure CI passes: `mise run test`
 2. Update version in `metadata.lua`
 3. Tag and push:
 
