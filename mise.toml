@@ -25,7 +25,6 @@ run = "lua tests/run_tests.lua"
 description = "Run integration tests against the linked backend plugin"
 run = [
     "mise plugin link --force krew .",
-    "mise cache clear",
     "bash tests/integration_test.sh",
 ]
 
