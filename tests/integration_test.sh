@@ -30,8 +30,17 @@ check() {
 
 echo "mise-krew integration tests"
 
-mise uninstall krew:tree --all >/dev/null 2>&1 || true
-mise uninstall krew:browse-pvc --all >/dev/null 2>&1 || true
+# Per-tool cleanup: removes installed binaries and the plugin's per-tool
+# version index. Never touches `registry/` (the shared krew-index clone) so
+# repeated local runs don't pay a full re-clone.
+clean_tool() {
+    local tool="$1"
+    mise uninstall "krew:$tool" --all >/dev/null 2>&1 || true
+    rm -f "cache/$tool.json"
+}
+
+clean_tool tree
+clean_tool browse-pvc
 
 check "plugin is linked"                          "mise plugin list | grep -q krew"
 check "list remote versions for tree"             "mise ls-remote krew:tree | grep -q 'v0.4'"
