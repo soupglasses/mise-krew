@@ -198,22 +198,16 @@ Commits follow the [Conventional Commits](https://www.conventionalcommits.org) f
 
 ## Releasing
 
-1. Ensure CI passes: `mise run test`
-2. Update version in `metadata.lua`
-3. Tag and push:
+1. Confirm green: `mise run test`.
+2. Bump `version` in `metadata.lua`, commit as `chore: prepare release X.Y.Z`, push to `main`.
+3. Tag and publish (no `v` prefix):
 
    ```bash
-   git tag v2.0.0
-   git push origin v2.0.0
-   ```
-
-4. Verify installation works:
-
-   ```bash
-   mise plugin install krew-test https://github.com/soupglasses/mise-krew
-   mise use krew-test:tree
+   git tag -a X.Y.Z -m "Release X.Y.Z"
+   git push origin X.Y.Z
+   gh release create X.Y.Z --title X.Y.Z --generate-notes
    ```
 
 ## Third-Party Code
 
-This project vendors [lua-yaml](https://github.com/exosite/lua-yaml) (MIT License) for YAML parsing. See [NOTICE](./NOTICE) for full attribution.
+This project vendors [lua-tinyyaml](https://github.com/zepinglee/lua-tinyyaml) (MIT License) for YAML parsing. See [NOTICE](./NOTICE) for full attribution.
