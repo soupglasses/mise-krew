@@ -15,7 +15,9 @@ _G.file = {
             f:close()
             return true
         end
-        return false
+        -- `io.open` cannot open directories everywhere; renaming a path onto
+        -- itself succeeds for anything that exists.
+        return os.rename(path, path) == true
     end,
     read = function(path)
         local f = io.open(path, "r")
@@ -41,10 +43,21 @@ _G.RUNTIME = {
     pluginDirPath = ".",
 }
 
+-- Expose the fake plugin environment through `require`, the way the modules
+-- reach it at runtime. The tables are shared, so a test can stub a single
+-- function on them.
+package.preload["file"] = function()
+    return _G.file
+end
+package.preload["cmd"] = function()
+    return _G.cmd
+end
+
 local framework = require("framework")
 local suites = {
     (require("test_manifest")),
     (require("test_installer")),
+    (require("test_registry")),
 }
 
 local ok = true

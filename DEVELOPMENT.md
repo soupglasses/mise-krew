@@ -137,8 +137,9 @@ The plugin uses a two-level caching system to avoid expensive git operations on 
 
 1. **Git Registry Cache** (`registry/`)
    - Full clone of `kubernetes-sigs/krew-index`
-   - Updated if last fetch was >24 hours ago (`registry.CACHE_TTL_SECONDS`)
+   - Updated if last fetch was >24 hours ago (`registry.CACHE_TTL_SECONDS`), as recorded in `registry/.git/mise-krew-last-fetch`
    - Trigger: `registry.ensure_fresh()` called at the start of every operation
+   - Clone and refresh run under a `registry.lock/` directory lock, because mise resolves several `krew:` tools in parallel and they all share this one clone
 
 2. **Version Index Cache** (`cache/<tool>.json`)
    - Per-tool version lists with commit mappings
@@ -155,7 +156,7 @@ The version index cache is rebuilt when ANY of these conditions are met:
 | **Schema version mismatch** | `load_cached()` | Plugin updated, old cache incompatible |
 | **TTL expired (24h)** | `load_cached()` | `os.time() - cache.generated_at > 86400` |
 | **Registry HEAD changed** | `load_cached()` | krew-index has new commits |
-| **Registry stale (24h)** | `refresh_if_stale()` | Git fetch needed before building index |
+| **Registry stale (24h)** | `is_stale()` | Git fetch needed before building index |
 
 ### Cache Flow
 
