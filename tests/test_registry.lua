@@ -3,6 +3,7 @@ local registry = require("registry")
 local cmd = require("cmd")
 
 local real_exec = cmd.exec
+local real_stamp_file = registry.STAMP_FILE
 local calls = {}
 
 -- Point the registry at a throwaway plugin directory and record the git
@@ -37,6 +38,7 @@ end
 
 local function teardown(temp)
     cmd.exec = real_exec
+    registry.STAMP_FILE = real_stamp_file
     registry.LOCK_TIMEOUT_SECONDS = 300
     registry.LOCK_UNSTAMPED_RETRIES = 25
     os.execute("rm -rf '" .. temp .. "'")
@@ -140,6 +142,19 @@ M.test("refresh: records the fetch time", function()
     teardown(temp)
 end)
 
+M.test("refresh: reports a fetch timestamp write failure", function()
+    local temp = setup()
+    fake_clone()
+    registry.STAMP_FILE = ".git/missing/mise-krew-last-fetch"
+
+    local ok, err = registry.refresh()
+
+    M.assert_equals(ok, nil)
+    assert_matches(tostring(err), "Failed to record registry fetch time", "expected a timestamp error")
+
+    teardown(temp)
+end)
+
 M.test("clone: stages the clone aside before moving it into place", function()
     local temp = setup()
 
@@ -149,6 +164,18 @@ M.test("clone: stages the clone aside before moving it into place", function()
     assert_matches(joined_calls(), ".incomplete", "expected the clone to be staged")
     M.assert_equals(registry.exists(), true)
     M.assert_equals(registry.is_stale(), false)
+
+    teardown(temp)
+end)
+
+M.test("clone: reports a fetch timestamp write failure", function()
+    local temp = setup()
+    registry.STAMP_FILE = ".git/missing/mise-krew-last-fetch"
+
+    local ok, err = registry.clone()
+
+    M.assert_equals(ok, nil)
+    assert_matches(tostring(err), "Failed to record registry fetch time", "expected a timestamp error")
 
     teardown(temp)
 end)
@@ -185,6 +212,30 @@ M.test("with_lock: releases the lock when the callback raises", function()
     teardown(temp)
 end)
 
+M.test("with_lock: an expired owner cannot release its successor's lock", function()
+    local temp = setup()
+    local file = require("file")
+    local successor_path = registry.get_lock_path() .. ".successor"
+
+    local result = registry.with_lock(function()
+        os.rename(registry.get_lock_path(), successor_path)
+        os.execute("mkdir -p '" .. registry.get_lock_path() .. "'")
+        local owner = io.open(registry.get_lock_path() .. "/owner", "w")
+        owner:write("successor")
+        owner:close()
+        local created_at = io.open(registry.get_lock_path() .. "/created_at", "w")
+        created_at:write(tostring(os.time()))
+        created_at:close()
+        return "done"
+    end)
+
+    M.assert_equals(result, "done")
+    M.assert_equals(file.exists(registry.get_lock_path()), true, "the successor's lock must remain")
+    M.assert_equals(file.exists(successor_path), true, "the expired owner's lock must not affect its successor")
+
+    teardown(temp)
+end)
+
 M.test("with_lock: refuses to run while another process holds the lock", function()
     local temp = setup()
     registry.LOCK_TIMEOUT_SECONDS = 0
@@ -212,6 +263,9 @@ M.test("with_lock: reclaims a lock left behind by a dead process", function()
     registry.LOCK_TIMEOUT_SECONDS = 0
 
     os.execute("mkdir -p '" .. registry.get_lock_path() .. "'")
+    local owner = io.open(registry.get_lock_path() .. "/owner", "w")
+    owner:write("dead-owner")
+    owner:close()
     local handle = io.open(registry.get_lock_path() .. "/created_at", "w")
     handle:write(tostring(os.time() - registry.LOCK_STALE_SECONDS - 1))
     handle:close()
@@ -231,12 +285,32 @@ M.test("with_lock: reclaims a lock that never got a timestamp", function()
     registry.LOCK_UNSTAMPED_RETRIES = 0
 
     os.execute("mkdir -p '" .. registry.get_lock_path() .. "'")
+    local owner = io.open(registry.get_lock_path() .. "/owner", "w")
+    owner:write("dead-owner")
+    owner:close()
 
     local result = registry.with_lock(function()
         return "ran"
     end)
 
     M.assert_equals(result, "ran")
+
+    teardown(temp)
+end)
+
+M.test("with_lock: never reclaims a lock without an owner identity", function()
+    local temp = setup()
+    registry.LOCK_TIMEOUT_SECONDS = 0
+    registry.LOCK_UNSTAMPED_RETRIES = 0
+
+    os.execute("mkdir -p '" .. registry.get_lock_path() .. "'")
+
+    local result, err = registry.with_lock(function()
+        return "must not run"
+    end)
+
+    M.assert_equals(result, nil)
+    assert_matches(tostring(err), "Timed out", "an unidentified lock cannot be reclaimed safely")
 
     teardown(temp)
 end)

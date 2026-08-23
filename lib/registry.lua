@@ -32,6 +32,43 @@ local function quote(path)
     return "'" .. escaped .. "'"
 end
 
+local function read_file(path)
+    local handle = io.open(path, "r")
+    if not handle then
+        return nil
+    end
+
+    local content = handle:read("*all")
+    handle:close()
+    return content
+end
+
+local function write_file(path, content)
+    local handle, open_err = io.open(path, "w")
+    if not handle then
+        return nil, open_err
+    end
+
+    local ok, write_err = handle:write(content)
+    if not ok then
+        handle:close()
+        return nil, write_err
+    end
+
+    local closed, close_err = handle:close()
+    if not closed then
+        return nil, close_err
+    end
+
+    return true, nil
+end
+
+local function unique_token()
+    local temp_path = os.tmpname()
+    os.remove(temp_path)
+    return temp_path:gsub("[^%w]", "") .. tostring(os.time())
+end
+
 -- Run a git command and turn a failure into a plain error string.
 -- `cmd.exec` raises on a non-zero exit status, which reaches the user as a Lua
 -- traceback instead of an actionable message.
@@ -82,28 +119,18 @@ end
 
 -- Timestamp of the last successful fetch, 0 when never fetched
 function M.get_last_fetch()
-    local handle = io.open(M.get_stamp_path(), "r")
-    if not handle then
-        return 0
-    end
-
-    local content = handle:read("*all")
-    handle:close()
-
+    local content = read_file(M.get_stamp_path())
     return tonumber(content and content:match("%d+")) or 0
 end
 
 -- Record a successful fetch
 function M.mark_fetched()
-    local handle = io.open(M.get_stamp_path(), "w")
-    if not handle then
-        return false
+    local ok, err = write_file(M.get_stamp_path(), tostring(os.time()))
+    if not ok then
+        return nil, "Failed to record registry fetch time: " .. tostring(err)
     end
 
-    handle:write(tostring(os.time()))
-    handle:close()
-
-    return true
+    return true, nil
 end
 
 -- Check whether the registry is older than the TTL
@@ -113,14 +140,7 @@ end
 
 -- Age in seconds of the currently held lock, nil when it carries no timestamp
 function M.lock_age()
-    local handle = io.open(M.get_lock_path() .. "/created_at", "r")
-    if not handle then
-        return nil
-    end
-
-    local content = handle:read("*all")
-    handle:close()
-
+    local content = read_file(M.get_lock_path() .. "/created_at")
     local created_at = tonumber(content and content:match("%d+"))
     if not created_at then
         return nil
@@ -129,9 +149,47 @@ function M.lock_age()
     return os.time() - created_at
 end
 
--- Release the lock, whether or not we own it
-function M.release_lock()
-    return shell("rm -rf " .. quote(M.get_lock_path()))
+local function get_lock_owner()
+    return read_file(M.get_lock_path() .. "/owner")
+end
+
+-- Move a lock we still own away from the shared path before deleting it.
+-- The inner directory serialises all removers; re-checking ownership and age
+-- after acquiring it prevents a delayed owner or stale-lock waiter from
+-- deleting a successor's lock.
+local function retire_lock(expected_owner, stale_only)
+    local lock_path = M.get_lock_path()
+    local removing_path = lock_path .. "/.removing"
+    if expected_owner == nil then
+        return false
+    end
+
+    if not shell("mkdir " .. quote(removing_path) .. " 2>/dev/null") then
+        return false
+    end
+
+    local owner = get_lock_owner()
+    local age = M.lock_age()
+    local may_remove = owner == expected_owner and (not stale_only or age == nil or age > M.LOCK_STALE_SECONDS)
+
+    if not may_remove then
+        shell("rmdir " .. quote(removing_path) .. " 2>/dev/null")
+        return false
+    end
+
+    local retired_path = lock_path .. ".retired." .. unique_token()
+    if not os.rename(lock_path, retired_path) then
+        shell("rmdir " .. quote(removing_path) .. " 2>/dev/null")
+        return false
+    end
+
+    shell("rm -rf " .. quote(retired_path))
+    return true
+end
+
+-- Release only the lock identified by this owner's token.
+function M.release_lock(owner)
+    return retire_lock(owner, false)
 end
 
 -- Run `fn` with exclusive access to the registry directory.
@@ -146,32 +204,41 @@ function M.with_lock(fn)
 
     while not shell(acquire) do
         local age = M.lock_age()
-        if age == nil then
-            -- Either a lock being created right now, or one whose owner died
-            -- between `mkdir` and the timestamp write. Only the second case
-            -- persists, so require it to persist before breaking the lock.
+        local owner = get_lock_owner()
+        if age == nil and owner ~= nil then
+            -- The owner identity is written before the timestamp. Once it is
+            -- present, the lock can be reclaimed without confusing it with a
+            -- newly created, not-yet-identified successor.
             unstamped_for = unstamped_for + 1
         else
             unstamped_for = 0
         end
 
-        if (age and age > M.LOCK_STALE_SECONDS) or unstamped_for > M.LOCK_UNSTAMPED_RETRIES then
-            M.release_lock()
-        elseif os.time() >= deadline then
+        local should_reclaim = (age and age > M.LOCK_STALE_SECONDS) or unstamped_for > M.LOCK_UNSTAMPED_RETRIES
+        local reclaimed = should_reclaim and retire_lock(owner, true)
+
+        if not reclaimed and os.time() >= deadline then
             return nil, "Timed out waiting for the registry lock at " .. lock_path
-        else
+        elseif not reclaimed then
             shell(M.LOCK_RETRY_COMMAND)
         end
     end
 
-    local stamp = io.open(lock_path .. "/created_at", "w")
-    if stamp then
-        stamp:write(tostring(os.time()))
-        stamp:close()
+    local owner = unique_token()
+    local owned, owner_err = write_file(lock_path .. "/owner", owner)
+    if not owned then
+        shell("rm -rf " .. quote(lock_path))
+        return nil, "Failed to identify the registry lock owner: " .. tostring(owner_err)
+    end
+
+    local stamped, stamp_err = write_file(lock_path .. "/created_at", tostring(os.time()))
+    if not stamped then
+        M.release_lock(owner)
+        return nil, "Failed to timestamp the registry lock: " .. tostring(stamp_err)
     end
 
     local ok, result, err = pcall(fn)
-    M.release_lock()
+    M.release_lock(owner)
 
     if not ok then
         return nil, tostring(result)
@@ -227,7 +294,10 @@ function M.clone()
         return nil, "Failed to move the registry into place: " .. registry_path
     end
 
-    M.mark_fetched()
+    local marked, mark_err = M.mark_fetched()
+    if not marked then
+        return nil, mark_err
+    end
 
     return true, nil
 end
@@ -250,7 +320,10 @@ function M.refresh()
         return nil, "Failed to reset registry to origin/master: " .. reset_err
     end
 
-    M.mark_fetched()
+    local marked, mark_err = M.mark_fetched()
+    if not marked then
+        return nil, mark_err
+    end
 
     return true, nil
 end
