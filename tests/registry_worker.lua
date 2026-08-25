@@ -63,7 +63,7 @@ local registry = require("registry")
 registry.REPO_URL = repo_url
 registry.CACHE_TTL_SECONDS = 0
 registry.FETCH_RETRIES = 50
-registry.INIT_STALE_SECONDS = 30
+registry.INITIAL_CLONE_STALE_SECONDS = 30
 
 local ok, err = registry.ensure_fresh()
 if not ok then
