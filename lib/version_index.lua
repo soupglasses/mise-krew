@@ -36,19 +36,19 @@ function M.build_index(tool)
     -- Ensure registry is available
     local registry_ok, registry_err = registry.ensure_fresh()
     if not registry_ok then
-        return nil, "Failed to ensure registry: " .. tostring(registry_err)
+        return nil, registry_err
     end
 
     -- Get current HEAD
     local head, head_err = registry.get_head()
     if not head then
-        return nil, "Failed to get registry HEAD: " .. tostring(head_err)
+        return nil, head_err
     end
 
     -- Get file history
     local commits_iter, history_err = registry.get_file_history(tool)
     if not commits_iter then
-        return nil, "Failed to get file history: " .. tostring(history_err)
+        return nil, history_err
     end
 
     local versions = {}

@@ -108,8 +108,12 @@ function M.get_file_history(plugin_name)
 
     local result = cmd.exec(log_cmd, { cwd = registry_path })
 
-    if result == "" or result:match("fatal") then
-        return nil, "Failed to get file history for: " .. plugin_name
+    if result:match("fatal") then
+        return nil, "failed to read krew index history for: " .. plugin_name
+    end
+
+    if result == "" then
+        return nil, "plugin not found in krew index: " .. plugin_name
     end
 
     local lines = {}

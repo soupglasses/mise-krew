@@ -1,19 +1,20 @@
 function PLUGIN:BackendListVersions(ctx)
     local tool = ctx.tool
+    local diagnostics = require("diagnostics")
 
     if not tool or tool == "" then
-        error("Tool name cannot be empty")
+        diagnostics.fail("tool name cannot be empty")
     end
 
     local version_index = require("version_index")
 
     local versions, err = version_index.get_versions(tool)
     if not versions then
-        error("Failed to get versions for '" .. tool .. "': " .. tostring(err))
+        diagnostics.fail(tostring(err))
     end
 
     if #versions == 0 then
-        error("No versions found for " .. tool)
+        diagnostics.fail("no versions found for krew:" .. tool)
     end
 
     return { versions = versions }
