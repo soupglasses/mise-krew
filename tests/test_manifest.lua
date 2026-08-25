@@ -88,6 +88,17 @@ M.test("platform selection: matchExpressions In", function()
     M.assert_not_nil(platform2, "Linux selection failed: " .. tostring(err2))
 end)
 
+M.test("volsync v0.15.0: platform after multiline description", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("volsync"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+    M.assert_equals(#result.platforms, 2, "expected platforms after description block")
+
+    local platform, platform_err = manifest.select_platform(result, "linux", "amd64")
+    M.assert_not_nil(platform, "Platform selection failed: " .. tostring(platform_err))
+    M.assert_equals(platform.bin, "kubectl-volsync", "bin mismatch")
+end)
+
 M.test("platform selection: unsupported platform", function()
     local manifest = require("manifest")
     local result, parse_err = manifest.parse(M.load_fixture("browse-pvc"))
