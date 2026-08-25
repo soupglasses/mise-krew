@@ -56,7 +56,6 @@ end
 package.preload["cmd"] = function()
     return cmd
 end
-
 _G.RUNTIME = { pluginDirPath = plugin_path }
 
 local registry = require("registry")

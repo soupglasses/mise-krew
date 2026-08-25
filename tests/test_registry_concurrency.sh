@@ -41,6 +41,14 @@ mkdir "$plugin/registry.initializing"
 printf 'deadworker' >"$plugin/registry.initializing/owner"
 printf '0' >"$plugin/registry.initializing/started_at"
 
+# Retired claims suppress delayed ABA races, but must not accumulate forever.
+mkdir "$plugin/registry.initializing.retired.oldclaim"
+printf 'oldclaim' >"$plugin/registry.initializing.retired.oldclaim/owner"
+printf '0' >"$plugin/registry.initializing.retired.oldclaim/started_at"
+mkdir "$plugin/registry.initializing.retired.recentclaim"
+printf 'recentclaim' >"$plugin/registry.initializing.retired.recentclaim/owner"
+date +%s >"$plugin/registry.initializing.retired.recentclaim/started_at"
+
 run_workers() {
     local phase=$1
     local pids=()
@@ -73,6 +81,14 @@ if [[ "$clone_count" -ne 1 ]]; then
 fi
 if [[ -e "$plugin/registry.initializing" ]]; then
     echo "initialization claim was not retired" >&2
+    exit 1
+fi
+if [[ -e "$plugin/registry.initializing.retired.deadworker" || -e "$plugin/registry.initializing.retired.oldclaim" ]]; then
+    echo "expired initialization tombstones were not removed" >&2
+    exit 1
+fi
+if [[ ! -e "$plugin/registry.initializing.retired.recentclaim" ]]; then
+    echo "recent initialization tombstone was removed" >&2
     exit 1
 fi
 

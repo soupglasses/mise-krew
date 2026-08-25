@@ -159,8 +159,9 @@ Bootstrap coalesces work without making the claim part of correctness:
 2. The winner clones into its own `registry.incomplete.<token>` directory, then
    atomically renames the completed clone to `registry`.
 3. Other processes wait with 0.1–1.0 second jitter and use the published clone.
-4. A stale claim is renamed to an owner-specific tombstone. The tombstone is
-   intentionally retained so a delayed waiter cannot retire a successor's claim.
+4. A stale claim is renamed to an owner-specific tombstone. Tombstones are
+   retained for 24 hours so delayed waiters cannot retire a successor's claim,
+   then garbage-collected to keep storage use bounded in practice.
 
 Claims become stale after five minutes, allowing recovery when an initializer is
 killed. A separate ten-minute deadline turns unrecoverable filesystem failures

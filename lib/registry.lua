@@ -31,6 +31,7 @@ M.FETCH_RETRY_COMMAND = "sleep 0.1"
 M.INITIAL_CLONE_STALE_SECONDS = 300
 M.INITIAL_CLONE_TIMEOUT_SECONDS = 600
 M.INITIAL_CLONE_BACKOFF_MAX_TENTHS = 10
+M.INITIAL_CLONE_TOMBSTONE_RETENTION_SECONDS = 86400 -- 24 hours
 
 -- Filesystem and process helpers
 -- os.execute returns an exit status on Lua 5.1 and a boolean on Lua 5.2+.
@@ -180,8 +181,8 @@ local function try_claim_initial_clone()
     return token
 end
 
-local function initial_clone_claim_age()
-    local content = read_file(M.get_initial_clone_claim_path() .. "/started_at")
+local function initial_clone_claim_age(claim_path)
+    local content = read_file((claim_path or M.get_initial_clone_claim_path()) .. "/started_at")
     local started_at = tonumber(content and content:match("%d+"))
     return started_at and (os.time() - started_at) or nil
 end
@@ -200,6 +201,58 @@ local function retire_initial_clone_claim(expected_owner)
         return false
     end
     return true
+end
+
+local function retired_initial_clone_claims()
+    local cmd = require("cmd")
+    local claim_path = M.get_initial_clone_claim_path()
+    local retired_prefix = claim_path .. ".retired."
+    local pattern = M.INITIAL_CLONE_CLAIM_DIR .. ".retired.*"
+    local command = table.concat({
+        "find",
+        quote(RUNTIME.pluginDirPath),
+        "! -path",
+        quote(RUNTIME.pluginDirPath),
+        "-prune -type d -name",
+        quote(pattern),
+        "-print",
+    }, " ")
+    local ok, output = pcall(cmd.exec, command)
+    if not ok then
+        return {}
+    end
+
+    local paths = {}
+    for path in output:gmatch("[^\r\n]+") do
+        local owner = path:sub(#retired_prefix + 1)
+        if path == retired_prefix .. owner and owner:match("^[%w]+$") then
+            table.insert(paths, path)
+        end
+    end
+    return paths
+end
+
+local function cleanup_retired_initial_clone_claims()
+    local file = require("file")
+    for _, retired_path in ipairs(retired_initial_clone_claims()) do
+        local age = initial_clone_claim_age(retired_path)
+        if age and age >= M.INITIAL_CLONE_TOMBSTONE_RETENTION_SECONDS then
+            -- Tombstones close the ABA window for delayed waiters. After 24 hours,
+            -- accepting a theoretical duplicate clone is preferable to leaking them forever.
+            os.remove(retired_path .. "/owner")
+            os.remove(retired_path .. "/started_at")
+            local removed, remove_err = os.remove(retired_path)
+            if not removed and file.exists(retired_path) then
+                require("log").warn(
+                    "Failed to remove expired registry initialization tombstone "
+                        .. retired_path
+                        .. ": "
+                        .. tostring(remove_err)
+                        .. ". It may contain unexpected files; leaving it in place."
+                )
+            end
+        end
+    end
 end
 
 -- Private clone and atomic publication
@@ -228,12 +281,14 @@ local function clone_and_publish(claim_owner)
 
     if os.rename(temp_path, registry_path) then
         retire_initial_clone_claim(claim_owner)
+        cleanup_retired_initial_clone_claims()
         return true, nil
     end
 
     shell("rm -rf " .. quote(temp_path))
     if M.exists() then
         retire_initial_clone_claim(claim_owner)
+        cleanup_retired_initial_clone_claims()
         return true, nil
     end
     retire_initial_clone_claim(claim_owner)
@@ -245,23 +300,26 @@ end
 function M.initialize_registry()
     local deadline = os.time() + M.INITIAL_CLONE_TIMEOUT_SECONDS
     while not M.exists() do
+        -- Have I been sleeping too long? A suspended waiter must not wake up
+        -- after its deadline and mutate a much newer initialization claim.
+        if os.time() >= deadline then
+            return nil, "Timed out waiting to initialize registry at " .. M.get_registry_path()
+        end
+
         local claim_owner = try_claim_initial_clone()
         if claim_owner then
             return clone_and_publish(claim_owner)
         end
 
+        -- Read the identity first so an old timestamp can only retire the claim
+        -- it belonged to, never a fresh successor published between these reads.
+        local owner = read_file(M.get_initial_clone_claim_path() .. "/owner")
         local age = initial_clone_claim_age()
-        if age and age >= M.INITIAL_CLONE_STALE_SECONDS then
-            local owner = read_file(M.get_initial_clone_claim_path() .. "/owner")
-            if owner then
-                retire_initial_clone_claim(owner)
-            end
+        if owner and age and age >= M.INITIAL_CLONE_STALE_SECONDS then
+            retire_initial_clone_claim(owner)
         end
 
         if not M.exists() then
-            if os.time() >= deadline then
-                return nil, "Timed out waiting to initialize registry at " .. M.get_registry_path()
-            end
             initial_clone_backoff()
         end
     end
