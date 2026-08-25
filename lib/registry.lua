@@ -12,7 +12,8 @@
 --
 -- REFRESH: Refreshes may run concurrently. They update only
 -- refs/remotes/origin/master, which Git publishes atomically after its objects
--- exist. Transient Git lock conflicts are retried.
+-- exist. Git rejects a stale ref transaction when another fetch publishes
+-- first; transient compare-and-swap and lock conflicts are retried.
 --
 -- READS: Each operation captures the registry ref once and reads manifests and
 -- history from that immutable commit. Never read from a mutable worktree.
@@ -233,24 +234,16 @@ local function retired_initial_clone_claims()
 end
 
 local function cleanup_retired_initial_clone_claims()
-    local file = require("file")
     for _, retired_path in ipairs(retired_initial_clone_claims()) do
         local age = initial_clone_claim_age(retired_path)
         if age and age >= M.INITIAL_CLONE_TOMBSTONE_RETENTION_SECONDS then
             -- Tombstones close the ABA window for delayed waiters. After 24 hours,
             -- accepting a theoretical duplicate clone is preferable to leaking them forever.
+            -- If the directory contains anything unexpected, leave it in place
+            -- instead of deleting data we do not own or failing initialization.
             os.remove(retired_path .. "/owner")
             os.remove(retired_path .. "/started_at")
-            local removed, remove_err = os.remove(retired_path)
-            if not removed and file.exists(retired_path) then
-                require("log").warn(
-                    "Failed to remove expired registry initialization tombstone "
-                        .. retired_path
-                        .. ": "
-                        .. tostring(remove_err)
-                        .. ". It may contain unexpected files; leaving it in place."
-                )
-            end
+            os.remove(retired_path)
         end
     end
 end
@@ -328,7 +321,9 @@ end
 
 -- Concurrent refresh
 -- Fetch only the ref the plugin reads. Git publishes refs atomically after all
--- referenced objects are present; bounded retries handle competing fetches.
+-- referenced objects are present and rejects an update if the ref changed since
+-- the fetch began. Bounded retries handle competing fetches, while the forced
+-- refspec still permits an intentional upstream force-push.
 function M.refresh()
     local fetch_args = table.concat({
         "fetch",

@@ -141,9 +141,9 @@ The plugin uses a two-level caching system to avoid expensive git operations on 
    - Trigger: `registry.ensure_fresh()` called at the start of every operation
    - Uses **optimistic parallelism**: one initialization-folder winner clones
      privately and publishes atomically while other jobs use jittered backoff.
-     Refresh jobs rely on Git's atomic ref updates and retry clean contention.
-     Reads are pinned to a captured commit, so concurrent refreshes never expose
-     a partially updated registry.
+     Refresh jobs rely on Git's atomic compare-and-swap ref updates and retry
+     clean contention. Reads are pinned to a captured commit, so concurrent
+     refreshes never expose a partially updated registry.
 
 2. **Version Index Cache** (`cache/<tool>.json`)
    - Per-tool version lists with commit mappings
@@ -169,10 +169,11 @@ into an error instead of leaving callers in an indefinite wait.
 
 Refreshes do not use the initialization claim. They fetch only
 `refs/remotes/origin/master`; Git atomically publishes that ref after its objects
-are available, and competing fetches retry clean lock conflicts. Each reader
-captures the ref's commit once and uses that commit for its complete operation.
-Consequently, readers see either the old snapshot or the new snapshot, never a
-partially updated worktree.
+are available. Ref publication compares against the value observed when the
+fetch began, so a stale fetch cannot overwrite a concurrent winner; it fails and
+retries against the current remote tip. Each reader captures the ref's commit
+once and uses that commit for its complete operation. Consequently, readers see
+either the old snapshot or the new snapshot, never a partially updated worktree.
 
 ### Cache Invalidation Triggers
 
