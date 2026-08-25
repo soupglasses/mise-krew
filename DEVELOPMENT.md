@@ -139,11 +139,39 @@ The plugin uses a two-level caching system to avoid expensive git operations on 
    - Full clone of `kubernetes-sigs/krew-index`
    - Updated if last fetch was >24 hours ago (`registry.CACHE_TTL_SECONDS`)
    - Trigger: `registry.ensure_fresh()` called at the start of every operation
+   - Uses **optimistic parallelism**: one initialization-folder winner clones
+     privately and publishes atomically while other jobs use jittered backoff.
+     Refresh jobs rely on Git's atomic ref updates and retry clean contention.
+     Reads are pinned to a captured commit, so concurrent refreshes never expose
+     a partially updated registry.
 
 2. **Version Index Cache** (`cache/<tool>.json`)
    - Per-tool version lists with commit mappings
    - Built by walking git history and parsing each manifest version
    - Stored as JSON with schema version for compatibility
+
+### Registry Optimistic Parallelism
+
+Bootstrap coalesces work without making the claim part of correctness:
+
+1. Each process prepares a complete initialization claim and atomically renames
+   it to `registry.initializing`; one process wins.
+2. The winner clones into its own `registry.incomplete.<token>` directory, then
+   atomically renames the completed clone to `registry`.
+3. Other processes wait with 0.1–1.0 second jitter and use the published clone.
+4. A stale claim is renamed to an owner-specific tombstone. The tombstone is
+   intentionally retained so a delayed waiter cannot retire a successor's claim.
+
+Claims become stale after five minutes, allowing recovery when an initializer is
+killed. A separate ten-minute deadline turns unrecoverable filesystem failures
+into an error instead of leaving callers in an indefinite wait.
+
+Refreshes do not use the initialization claim. They fetch only
+`refs/remotes/origin/master`; Git atomically publishes that ref after its objects
+are available, and competing fetches retry clean lock conflicts. Each reader
+captures the ref's commit once and uses that commit for its complete operation.
+Consequently, readers see either the old snapshot or the new snapshot, never a
+partially updated worktree.
 
 ### Cache Invalidation Triggers
 
@@ -154,8 +182,8 @@ The version index cache is rebuilt when ANY of these conditions are met:
 | **Cache file missing** | `load_cached()` | First run for this tool |
 | **Schema version mismatch** | `load_cached()` | Plugin updated, old cache incompatible |
 | **TTL expired (24h)** | `load_cached()` | `os.time() - cache.generated_at > 86400` |
-| **Registry HEAD changed** | `load_cached()` | krew-index has new commits |
-| **Registry stale (24h)** | `refresh_if_stale()` | Git fetch needed before building index |
+| **Registry ref changed** | `load_cached()` | krew-index has new commits |
+| **Registry stale (24h)** | `ensure_fresh()` | Git fetch needed before building index |
 
 ### Cache Flow
 

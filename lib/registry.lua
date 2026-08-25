@@ -1,125 +1,333 @@
 -- lib/registry.lua
 -- Git registry wrapper for krew-index operations
--- Manages local clone and provides access to manifest history
 
 local M = {}
 
--- Registry configuration
 M.REPO_URL = "https://github.com/kubernetes-sigs/krew-index.git"
 M.REGISTRY_DIR = "registry"
+M.INIT_DIR = "registry.initializing"
+M.REGISTRY_REF = "refs/remotes/origin/master"
+M.STAMP_FILE = ".git/mise-krew-last-fetch"
 M.CACHE_TTL_SECONDS = 86400 -- 24 hours
+M.FETCH_RETRIES = 10
+M.FETCH_RETRY_COMMAND = "sleep 0.1"
+M.INIT_STALE_SECONDS = 300
+M.INIT_TIMEOUT_SECONDS = 600
+M.INIT_BACKOFF_MAX_TENTHS = 10
 
--- Get the path to the registry directory
+-- os.execute returns an exit status on Lua 5.1 and a boolean on Lua 5.2+.
+local function shell(command)
+    local ok, _, code = os.execute(command)
+    if type(ok) == "number" then
+        return ok == 0
+    end
+    return ok == true and (code == nil or code == 0)
+end
+
+local function quote(value)
+    local escaped = tostring(value):gsub("'", "'\\''")
+    return "'" .. escaped .. "'"
+end
+
+local function read_file(path)
+    local handle = io.open(path, "r")
+    if not handle then
+        return nil
+    end
+
+    local content = handle:read("*all")
+    handle:close()
+    return content
+end
+
+local function write_file(path, content)
+    local handle, open_err = io.open(path, "w")
+    if not handle then
+        return nil, open_err
+    end
+
+    local ok, write_err = handle:write(content)
+    if not ok then
+        handle:close()
+        return nil, write_err
+    end
+
+    local closed, close_err = handle:close()
+    if not closed then
+        return nil, close_err
+    end
+
+    return true, nil
+end
+
+local function unique_token()
+    local temp_path = os.tmpname()
+    os.remove(temp_path)
+    return temp_path:gsub("[^%w]", "") .. tostring(os.time())
+end
+
+local function initialization_backoff()
+    local token = unique_token()
+    local checksum = 0
+    for i = 1, #token do
+        checksum = checksum + token:byte(i)
+    end
+    local tenths = (checksum % M.INIT_BACKOFF_MAX_TENTHS) + 1
+    local delay = tenths == 10 and "1.0" or "0." .. tostring(tenths)
+    shell("sleep " .. delay)
+end
+
+local function git(args, cwd)
+    local cmd = require("cmd")
+    local command = "git -c core.fsmonitor=false " .. args
+    local ok, result
+    if cwd then
+        ok, result = pcall(cmd.exec, command, { cwd = cwd })
+    else
+        ok, result = pcall(cmd.exec, command)
+    end
+
+    if not ok then
+        return nil, "`git " .. args .. "` failed: " .. tostring(result)
+    end
+    return result or "", nil
+end
+
+M.git = git
+
 function M.get_registry_path()
     local file = require("file")
     return file.join_path(RUNTIME.pluginDirPath, M.REGISTRY_DIR)
 end
 
--- Check if registry exists locally
+function M.get_stamp_path(registry_path)
+    local file = require("file")
+    return file.join_path(registry_path or M.get_registry_path(), M.STAMP_FILE)
+end
+
+function M.get_init_path()
+    local file = require("file")
+    return file.join_path(RUNTIME.pluginDirPath, M.INIT_DIR)
+end
+
 function M.exists()
     local file = require("file")
     local registry_path = M.get_registry_path()
     return file.exists(registry_path) and file.exists(file.join_path(registry_path, ".git"))
 end
 
--- Ensure registry is cloned and up to date
+function M.get_last_fetch()
+    local content = read_file(M.get_stamp_path())
+    return tonumber(content and content:match("%d+")) or 0
+end
+
+function M.mark_fetched(registry_path)
+    local stamp_path = M.get_stamp_path(registry_path)
+    local temp_path = stamp_path .. ".tmp." .. unique_token()
+    local ok, err = write_file(temp_path, tostring(os.time()))
+    if not ok then
+        return nil, "Failed to record registry fetch time: " .. tostring(err)
+    end
+
+    if not os.rename(temp_path, stamp_path) then
+        os.remove(temp_path)
+        return nil, "Failed to publish registry fetch time: " .. stamp_path
+    end
+    return true, nil
+end
+
+function M.is_stale()
+    return (os.time() - M.get_last_fetch()) >= M.CACHE_TTL_SECONDS
+end
+
 function M.ensure_fresh()
     if not M.exists() then
         return M.clone()
     end
-
-    return M.refresh_if_stale()
-end
-
--- Clone the registry repository
-function M.clone()
-    local cmd = require("cmd")
-
-    local registry_path = M.get_registry_path()
-
-    local clone_cmd = string.format("git clone %s %s", M.REPO_URL, registry_path)
-    local result = cmd.exec(clone_cmd)
-
-    if result:match("error") or result:match("fatal") then
-        return nil, "Failed to clone registry: " .. result
+    if M.is_stale() then
+        return M.refresh()
     end
-
     return true, nil
 end
 
--- Refresh registry if stale (older than TTL)
-function M.refresh_if_stale()
-    local cmd = require("cmd")
+-- Publish a fully initialized clone claim atomically. The claim only coalesces
+-- downloads; correctness still comes from private clones and atomic publication.
+local function claim_initialization()
+    local init_path = M.get_init_path()
+    local token = unique_token()
+    local candidate_path = init_path .. ".candidate." .. token
+    if not shell("mkdir " .. quote(candidate_path) .. " 2>/dev/null") then
+        return nil
+    end
+
+    local owner_ok = write_file(candidate_path .. "/owner", token)
+    local stamp_ok = write_file(candidate_path .. "/started_at", tostring(os.time()))
+    if not owner_ok or not stamp_ok or not os.rename(candidate_path, init_path) then
+        shell("rm -rf " .. quote(candidate_path))
+        return nil
+    end
+    return token
+end
+
+local function init_age()
+    local content = read_file(M.get_init_path() .. "/started_at")
+    local started_at = tonumber(content and content:match("%d+"))
+    return started_at and (os.time() - started_at) or nil
+end
+
+local function retire_initialization(expected_owner)
+    local init_path = M.get_init_path()
+    if not expected_owner:match("^[%w]+$") or read_file(init_path .. "/owner") ~= expected_owner then
+        return false
+    end
+
+    -- All waiters for this owner target the same non-empty directory. The first
+    -- rename wins; retaining that tombstone prevents a delayed waiter from
+    -- renaming a successor claim after the ownership check above (an ABA race).
+    local retired_path = init_path .. ".retired." .. expected_owner
+    if not os.rename(init_path, retired_path) then
+        return false
+    end
+    return true
+end
+
+local function clone_private(init_owner)
     local registry_path = M.get_registry_path()
+    local temp_path = registry_path .. ".incomplete." .. unique_token()
+    local clone_args = string.format(
+        "clone --quiet --no-checkout --no-recurse-submodules --single-branch --branch master --origin origin --no-tags %s %s",
+        quote(M.REPO_URL),
+        quote(temp_path)
+    )
 
-    local last_fetch = cmd.exec("git log -1 --format=%ct HEAD 2>/dev/null || echo 0", { cwd = registry_path })
-    last_fetch = tonumber(last_fetch:match("^%s*(%d+)%s*$")) or 0
-    local now = os.time()
+    local _, clone_err = git(clone_args)
+    if clone_err then
+        shell("rm -rf " .. quote(temp_path))
+        retire_initialization(init_owner)
+        return nil, "Failed to clone registry: " .. clone_err
+    end
 
-    if last_fetch > 0 and (now - last_fetch) < M.CACHE_TTL_SECONDS then
+    local marked, mark_err = M.mark_fetched(temp_path)
+    if not marked then
+        shell("rm -rf " .. quote(temp_path))
+        retire_initialization(init_owner)
+        return nil, mark_err
+    end
+
+    if os.rename(temp_path, registry_path) then
+        retire_initialization(init_owner)
         return true, nil
     end
 
-    return M.refresh()
+    shell("rm -rf " .. quote(temp_path))
+    if M.exists() then
+        retire_initialization(init_owner)
+        return true, nil
+    end
+    retire_initialization(init_owner)
+    return nil, "Failed to publish registry clone: " .. registry_path
 end
 
--- Force refresh the registry
-function M.refresh()
-    local cmd = require("cmd")
-    local registry_path = M.get_registry_path()
+-- Normally exactly one caller clones while the others wait. If that caller is
+-- killed, one waiter retires its old claim and becomes the next initializer.
+function M.clone()
+    local deadline = os.time() + M.INIT_TIMEOUT_SECONDS
+    while not M.exists() do
+        local init_owner = claim_initialization()
+        if init_owner then
+            return clone_private(init_owner)
+        end
 
-    -- Fetch from origin
-    local fetch_result = cmd.exec("git fetch --prune origin", { cwd = registry_path })
+        local age = init_age()
+        if age and age >= M.INIT_STALE_SECONDS then
+            local owner = read_file(M.get_init_path() .. "/owner")
+            if owner then
+                retire_initialization(owner)
+            end
+        end
 
-    -- Pull changes safely
-    cmd.exec("git checkout master", { cwd = registry_path })
-    local pull_result = cmd.exec("git pull --ff-only", { cwd = registry_path })
-
-    if pull_result:match("error") and pull_result:match("fatal") then
-        return nil, "Failed to refresh registry: " .. pull_result
+        if not M.exists() then
+            if os.time() >= deadline then
+                return nil, "Timed out waiting to initialize registry at " .. M.get_registry_path()
+            end
+            initialization_backoff()
+        end
     end
-
     return true, nil
 end
 
--- Get current HEAD commit hash
-function M.get_head()
-    local cmd = require("cmd")
-    local registry_path = M.get_registry_path()
+-- Fetch only the ref the plugin reads. Git publishes refs atomically after all
+-- referenced objects are present; bounded retries handle competing fetches.
+function M.refresh()
+    local fetch_args = table.concat({
+        "fetch",
+        "--quiet",
+        "--atomic",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "--no-write-fetch-head",
+        "--no-write-commit-graph",
+        "--no-auto-maintenance",
+        "origin",
+        "+refs/heads/master:" .. M.REGISTRY_REF,
+    }, " ")
 
-    local result = cmd.exec("git rev-parse HEAD", { cwd = registry_path })
-    result = result:gsub("%s+$", "") -- trim whitespace
+    local fetch_err
+    for attempt = 1, M.FETCH_RETRIES do
+        local _, err = git(fetch_args, M.get_registry_path())
+        if not err then
+            local marked, mark_err = M.mark_fetched()
+            if not marked then
+                return nil, mark_err
+            end
+            return true, nil
+        end
 
-    if result == "" or result:match("fatal") then
-        return nil, "Failed to get HEAD"
+        fetch_err = err
+        if attempt < M.FETCH_RETRIES then
+            shell(M.FETCH_RETRY_COMMAND)
+        end
     end
 
+    return nil, "Failed to refresh registry: " .. tostring(fetch_err)
+end
+
+function M.get_head()
+    local result, err = git("rev-parse --verify " .. quote(M.REGISTRY_REF .. "^{commit}"), M.get_registry_path())
+    if err then
+        return nil, "Failed to get registry head: " .. err
+    end
+
+    result = result:gsub("%s+$", "")
+    if result == "" or not result:match("^[0-9a-fA-F]+$") then
+        return nil, "Failed to get registry head"
+    end
     return result, nil
 end
 
--- Get git log for a specific plugin file
--- Returns iterator over commit hashes
-function M.get_file_history(plugin_name)
-    local cmd = require("cmd")
-    local registry_path = M.get_registry_path()
-
-    local plugin_path = "plugins/" .. plugin_name .. ".yaml"
-    local log_cmd = string.format("git --no-pager log --format=%%H --no-show-signature -- %s 2>/dev/null", plugin_path)
-
-    local result = cmd.exec(log_cmd, { cwd = registry_path })
-
-    if result:match("fatal") then
-        return nil, "failed to read krew index history for: " .. plugin_name
+-- The revision is captured by the caller so a concurrent fetch cannot change
+-- the history halfway through building a version index.
+function M.get_file_history(plugin_name, revision)
+    revision = revision or M.get_head()
+    if not revision then
+        return nil, "Failed to get registry head"
     end
 
+    local plugin_path = "plugins/" .. plugin_name .. ".yaml"
+    local args =
+        string.format("--no-pager log --format=%%H --no-show-signature %s -- %s", quote(revision), quote(plugin_path))
+    local result, err = git(args, M.get_registry_path())
+    if err then
+        return nil, "Failed to read krew index history for " .. plugin_name .. ": " .. err
+    end
     if result == "" then
-        return nil, "plugin not found in krew index: " .. plugin_name
+        return nil, "Plugin not found in krew index: " .. plugin_name
     end
 
     local lines = {}
     for line in result:gmatch("[^\r\n]+") do
         line = line:match("^%s*(.-)%s*$")
-        if line ~= "" and #line == 40 and line:match("^[0-9a-fA-F]+") then
+        if #line == 40 and line:match("^[0-9a-fA-F]+$") then
             table.insert(lines, line)
         end
     end
@@ -131,48 +339,32 @@ function M.get_file_history(plugin_name)
     end
 end
 
--- Get manifest content at a specific commit
 function M.get_manifest_at_commit(plugin_name, commit_hash)
-    local cmd = require("cmd")
-    local registry_path = M.get_registry_path()
-
     local plugin_path = "plugins/" .. plugin_name .. ".yaml"
-    local show_cmd = string.format("git show %s:%s", commit_hash, plugin_path)
-
-    local ok, result = pcall(cmd.exec, show_cmd, { cwd = registry_path })
-    if not ok then
-        return nil, "Failed to get manifest at commit " .. commit_hash .. ": " .. tostring(result)
+    local result, err = git("show " .. quote(commit_hash .. ":" .. plugin_path), M.get_registry_path())
+    if err then
+        return nil, "Failed to get manifest at commit " .. commit_hash .. ": " .. err
     end
-
     return result, nil
 end
 
--- Get the current manifest (latest version)
 function M.get_current_manifest(plugin_name)
-    local file = require("file")
-    local registry_path = M.get_registry_path()
-
-    local plugin_path = file.join_path(registry_path, "plugins", plugin_name .. ".yaml")
-
-    if not file.exists(plugin_path) then
-        return nil, "Plugin not found in registry: " .. plugin_name
+    local head, head_err = M.get_head()
+    if not head then
+        return nil, head_err
     end
-
-    local content = file.read(plugin_path)
-    if not content then
-        return nil, "Failed to read manifest for: " .. plugin_name
-    end
-
-    return content, nil
+    return M.get_manifest_at_commit(plugin_name, head)
 end
 
--- Check if a plugin exists in the registry
 function M.plugin_exists(plugin_name)
-    local file = require("file")
-    local registry_path = M.get_registry_path()
+    local head = M.get_head()
+    if not head then
+        return false
+    end
 
-    local plugin_path = file.join_path(registry_path, "plugins", plugin_name .. ".yaml")
-    return file.exists(plugin_path)
+    local plugin_path = "plugins/" .. plugin_name .. ".yaml"
+    local _, err = git("cat-file -e " .. quote(head .. ":" .. plugin_path), M.get_registry_path())
+    return err == nil
 end
 
 return M

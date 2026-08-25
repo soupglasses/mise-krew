@@ -39,14 +39,13 @@ function M.build_index(tool)
         return nil, registry_err
     end
 
-    -- Get current HEAD
+    -- Capture one registry revision for the complete index build.
     local head, head_err = registry.get_head()
     if not head then
         return nil, head_err
     end
 
-    -- Get file history
-    local commits_iter, history_err = registry.get_file_history(tool)
+    local commits_iter, history_err = registry.get_file_history(tool, head)
     if not commits_iter then
         return nil, history_err
     end
@@ -142,7 +141,7 @@ function M.load_cached(tool)
         return nil
     end
 
-    -- Check if registry HEAD has changed
+    -- Check if the published registry ref has changed.
     local registry = require("registry")
     if registry.exists() then
         local current_head, _ = registry.get_head()
