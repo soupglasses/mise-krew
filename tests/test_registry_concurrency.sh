@@ -2,6 +2,22 @@
 
 set -euo pipefail
 
+if [[ ${MISE_KREW_GIT_WRAPPER:-} == 1 ]]; then
+    pause_dir=${MISE_KREW_PAUSE_DIR:?}
+    git_exec_path=${MISE_KREW_GIT_EXEC_PATH:?}
+    case ${1:-} in
+        index-pack | unpack-objects)
+            if mkdir "$pause_dir/claimed" 2>/dev/null; then
+                touch "$pause_dir/ready"
+                while [[ ! -e "$pause_dir/release" ]]; do
+                    sleep 0.01
+                done
+            fi
+            ;;
+    esac
+    exec "$git_exec_path/git" "$@"
+fi
+
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/mise-krew-concurrency.XXXXXX")
 
@@ -139,7 +155,7 @@ git_exec_path=$(git --exec-path)
 for git_helper in "$git_exec_path"/*; do
     ln -s "$git_helper" "$paused_git_exec/$(basename "$git_helper")"
 done
-ln -sf "$repo_root/tests/pause_index_pack.sh" "$paused_git_exec/git"
+ln -sf "$repo_root/tests/test_registry_concurrency.sh" "$paused_git_exec/git"
 
 (
     cd "$repo_root"
@@ -148,6 +164,7 @@ ln -sf "$repo_root/tests/pause_index_pack.sh" "$paused_git_exec/git"
         GIT_CONFIG_KEY_0=fetch.unpackLimit \
         GIT_CONFIG_VALUE_0=1 \
         GIT_EXEC_PATH="$paused_git_exec" \
+        MISE_KREW_GIT_WRAPPER=1 \
         MISE_KREW_GIT_EXEC_PATH="$git_exec_path" \
         MISE_KREW_PAUSE_DIR="$pause_dir" \
         lua tests/registry_worker.lua "$plugin" "$remote" "$command_log"
