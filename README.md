@@ -28,6 +28,17 @@ Then run `mise install`.
 mise plugin install krew https://github.com/soupglasses/mise-krew
 ```
 
+## Updating
+
+The `[plugins]` entry selects the repository for new installations; it does not update an already installed plugin. Check for outdated plugins and update mise-krew with:
+
+```bash
+mise plugins ls --outdated
+mise plugins update krew
+```
+
+Then retry `mise install`. mise-krew errors include the plugin version and, when relevant, the update command.
+
 ## Usage
 
 Install a krew plugin (latest version):
