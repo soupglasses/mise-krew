@@ -7,6 +7,27 @@ local function basename(path)
     return path:match("[^/]+$") or path
 end
 
+local function normalize_archive_path(path)
+    if type(path) ~= "string" or path == "" or path:sub(1, 1) == "/" then
+        return nil
+    end
+
+    local parts = {}
+    for part in path:gmatch("[^/]+") do
+        if part == ".." then
+            return nil
+        elseif part ~= "." then
+            table.insert(parts, part)
+        end
+    end
+
+    if #parts == 0 then
+        return nil
+    end
+
+    return table.concat(parts, "/")
+end
+
 -- kubectl invokes `foo-bar` plugins as `kubectl foo bar` unless the binary is
 -- named with underscores. Mirrors krew's pluginNameToBin.
 function M.target_bin_name(tool)
@@ -160,9 +181,9 @@ end
 
 function M.install_files(platform, source_dir, install_path)
     local file = require("file")
-    local cmd = require("cmd")
 
     if platform.files and #platform.files > 0 then
+        local cmd = require("cmd")
         local any_copied = false
 
         for _, mapping in ipairs(platform.files) do
@@ -233,24 +254,34 @@ function M.install_files(platform, source_dir, install_path)
             return nil, "No files were installed from files[] mappings"
         end
     else
-        local bin_name = platform.bin
-        if not bin_name then
+        local bin_path = platform.bin
+        if not bin_path then
             return nil, "No bin specified in platform"
         end
 
-        local find_cmd_str = string.format("find '%s' -name '%s' -type f", source_dir, bin_name)
-        local ok, found_binary = pcall(cmd.exec, find_cmd_str)
-        if not ok or not found_binary or found_binary == "" then
-            return nil, "Binary not found in archive: " .. bin_name
+        local relative_path = normalize_archive_path(bin_path)
+        if not relative_path then
+            return nil, "Invalid archive-relative bin path: " .. tostring(bin_path)
         end
 
-        found_binary = found_binary:match("[^\r\n]+")
-        if not found_binary then
-            return nil, "Binary not found in archive: " .. bin_name
+        local found_binary = file.join_path(source_dir, relative_path)
+        if not file.exists(found_binary) and not relative_path:find("/", 1, true) then
+            local cmd = require("cmd")
+            local find_cmd_str = string.format("find '%s' -name '%s' -type f", source_dir, relative_path)
+            local ok, result = pcall(cmd.exec, find_cmd_str)
+            if ok and result then
+                found_binary = result:match("[^\r\n]+")
+                if found_binary then
+                    found_binary = found_binary:gsub("%s+$", "")
+                end
+            end
         end
-        found_binary = found_binary:gsub("%s+$", "")
 
-        local target = file.join_path(install_path, bin_name)
+        if not found_binary or found_binary == "" or not file.exists(found_binary) then
+            return nil, "Binary not found in archive: " .. bin_path
+        end
+
+        local target = file.join_path(install_path, basename(relative_path))
 
         local cp_ok = os.execute(string.format("cp '%s' '%s'", found_binary, target))
         if not cp_ok then
