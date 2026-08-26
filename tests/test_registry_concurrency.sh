@@ -55,6 +55,7 @@ git config --file "$hostile_config" fetch.recurseSubmodules on-demand
 git config --file "$hostile_config" maintenance.auto true
 git config --file "$hostile_config" init.defaultObjectFormat sha256
 git config --file "$hostile_config" init.defaultRefFormat reftable
+git config --file "$hostile_config" log.showSignature true
 git config --file "$hostile_config" pull.rebase true
 
 # A process killed during its private fetch can leave a ref lock behind. That
@@ -117,7 +118,7 @@ if [[ -n "$object_format" && "$object_format" != sha1 ]]; then
     echo "bootstrap repository inherited the hostile SHA-256 default" >&2
     exit 1
 fi
-if grep -Eq -- '--object-format|--atomic|--no-write-fetch-head|--no-auto-maintenance' "$command_log"; then
+if grep -Eq -- '--object-format|--atomic|--no-write-fetch-head|--no-auto-maintenance|--no-recurse-submodules|--no-show-signature' "$command_log"; then
     echo "bootstrap used a Git option unavailable on older supported clients" >&2
     exit 1
 fi

@@ -298,14 +298,16 @@ local function get_bootstrap_lease(registry_path, cached_lease)
 end
 
 local function fetch_ref(registry_path, destination_ref)
+    -- Prefer configuration overrides to newer negative flags. Older Git
+    -- accepts and ignores unknown configuration keys, but rejects unknown options.
     local fetch_args = table.concat({
         "-c fetch.writeCommitGraph=false",
+        "-c fetch.recurseSubmodules=false",
         "-c maintenance.auto=false",
         "-c gc.auto=0",
         "fetch",
         "--quiet",
         "--no-tags",
-        "--no-recurse-submodules",
         "origin",
         "+refs/heads/master:" .. destination_ref,
     }, " ")
@@ -578,8 +580,13 @@ function M.get_file_history(plugin_name, revision)
     end
 
     local plugin_path = "plugins/" .. plugin_name .. ".yaml"
-    local args =
-        string.format("--no-pager log --format=%%H --no-show-signature %s -- %s", quote(revision), quote(plugin_path))
+    -- Prefer a configuration override to the newer negative flag. Older Git
+    -- accepts and ignores unknown configuration keys, but rejects unknown options.
+    local args = string.format(
+        "-c log.showSignature=false --no-pager log --format=%%H %s -- %s",
+        quote(revision),
+        quote(plugin_path)
+    )
     local result, err = git(args, M.get_registry_path())
     if err then
         return nil, "Failed to read krew index history for " .. plugin_name .. ": " .. err
