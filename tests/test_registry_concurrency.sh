@@ -112,7 +112,8 @@ if [[ $(git -C "$plugin/registry" -c core.fsmonitor=false config --get extension
     echo "bootstrap repository inherited the hostile reftable default" >&2
     exit 1
 fi
-if [[ $(git -C "$plugin/registry" -c core.fsmonitor=false rev-parse --show-object-format) != sha1 ]]; then
+object_format=$(git -C "$plugin/registry" -c core.fsmonitor=false config --get extensions.objectFormat || true)
+if [[ -n "$object_format" && "$object_format" != sha1 ]]; then
     echo "bootstrap repository inherited the hostile SHA-256 default" >&2
     exit 1
 fi
