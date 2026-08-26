@@ -136,14 +136,14 @@ The plugin uses a two-level caching system to avoid expensive git operations on 
 ### Cache Levels
 
 1. **Git Registry Cache** (`registry/`)
-   - Full clone of `kubernetes-sigs/krew-index`
+   - Full-history mirror of `kubernetes-sigs/krew-index`
    - Updated if last fetch was >24 hours ago (`registry.CACHE_TTL_SECONDS`)
    - Trigger: `registry.ensure_fresh()` called at the start of every operation
-   - Uses **optimistic parallelism**: one initialization-folder winner clones
-     privately and publishes atomically while other jobs use jittered backoff.
-     Refresh jobs rely on Git's atomic compare-and-swap ref updates and retry
-     clean contention. Reads are pinned to a captured commit, so concurrent
-     refreshes never expose a partially updated registry.
+   - Uses **optimistic parallelism**: initialization publishes an empty Git
+     repository atomically, coalesces the expensive first fetch with an
+     advisory lease, and publishes the result with atomic create-if-absent.
+     Reads are pinned to a captured commit, so concurrent updates never expose
+     partially fetched history.
 
 2. **Version Index Cache** (`cache/<tool>.json`)
    - Per-tool version lists with commit mappings
@@ -152,28 +152,37 @@ The plugin uses a two-level caching system to avoid expensive git operations on 
 
 ### Registry Optimistic Parallelism
 
-Bootstrap coalesces work without making the claim part of correctness:
+Bootstrap separates repository publication from readiness:
 
-1. Each process prepares a complete initialization claim and atomically renames
-   it to `registry.initializing`; one process wins.
-2. The winner clones into its own `registry.incomplete.<token>` directory, then
-   atomically renames the completed clone to `registry`.
-3. Other processes wait with 0.1–1.0 second jitter and use the published clone.
-4. A stale claim is renamed to an owner-specific tombstone. Tombstones are
-   retained for 24 hours so delayed waiters cannot retire a successor's claim,
-   then garbage-collected to keep storage use bounded in practice.
+1. Each process prepares an empty Git repository in its own
+   `registry.incomplete.<token>` directory. Its object and ref formats are pinned
+   to SHA-1 and `files`, and only `remote.origin.url` is configured. Hostile Git
+   defaults therefore cannot make loose-ref publication invisible or install a
+   fetch refspec that bypasses candidate publication.
+2. Atomic rename publishes one empty repository as `registry`; that winner owns
+   the advisory bootstrap lease and normally performs the only full-history
+   download.
+3. The winner fetches into `refs/mise-krew/candidates/<token>`, prepares a loose
+   canonical ref, and publishes it with a same-filesystem hard link. This atomic
+   create-if-absent operation has no fixed bootstrap lockfile for a killed
+   process to strand. Recovery retires any canonical lock left by an older
+   publisher before declaring readiness. The canonical ref, not the directory,
+   marks the repository ready.
+4. Waiters replace an expired lease using Git compare-and-swap. A killed fetch
+   can strand only its unique candidate state, so the replacement fetch remains
+   unblocked. A stranded lease lock is retired once, and each waiter attempts a
+   particular lease generation at most once, bounding recovery work. The lease
+   remains only a download-coalescing optimization: after the recovery deadline,
+   callers may bypass it while candidate isolation and atomic canonical
+   publication continue to preserve correctness.
 
-Claims become stale after five minutes, allowing recovery when an initializer is
-killed. A separate ten-minute deadline turns unrecoverable filesystem failures
-into an error instead of leaving callers in an indefinite wait.
-
-Refreshes do not use the initialization claim. They fetch only
-`refs/remotes/origin/master`; Git atomically publishes that ref after its objects
-are available. Ref publication compares against the value observed when the
-fetch began, so a stale fetch cannot overwrite a concurrent winner; it fails and
-retries against the current remote tip. Each reader captures the ref's commit
-once and uses that commit for its complete operation. Consequently, readers see
-either the old snapshot or the new snapshot, never a partially updated worktree.
+Refresh fetches only `refs/remotes/origin/master`; Git atomically publishes the
+ref after its objects are available. Ref publication compares against the value
+observed when the fetch began, so a stale fetch cannot overwrite a concurrent
+winner; it fails and retries against the current remote tip. Each reader
+captures the ref's commit once and uses that commit for its complete operation.
+Consequently, readers see either the old snapshot or the new snapshot, never a
+partially updated worktree.
 
 ### Cache Invalidation Triggers
 

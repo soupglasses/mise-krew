@@ -33,9 +33,11 @@ local file = {
 
 local cmd = {
     exec = function(command, options)
-        local log = assert(io.open(command_log, "a"))
-        log:write(command, "\n")
-        log:close()
+        if command_log then
+            local log = assert(io.open(command_log, "a"))
+            log:write(command, "\n")
+            log:close()
+        end
 
         if options and options.cwd then
             command = "cd " .. quote(options.cwd) .. " && " .. command
@@ -62,7 +64,10 @@ local registry = require("registry")
 registry.REPO_URL = repo_url
 registry.CACHE_TTL_SECONDS = 0
 registry.FETCH_RETRIES = 50
-registry.INITIAL_CLONE_STALE_SECONDS = 30
+registry.BOOTSTRAP_LEASE_SECONDS = tonumber(os.getenv("MISE_KREW_BOOTSTRAP_LEASE_SECONDS"))
+    or registry.BOOTSTRAP_LEASE_SECONDS
+registry.BOOTSTRAP_TIMEOUT_SECONDS = tonumber(os.getenv("MISE_KREW_BOOTSTRAP_TIMEOUT_SECONDS"))
+    or registry.BOOTSTRAP_TIMEOUT_SECONDS
 
 local ok, err = registry.ensure_fresh()
 if not ok then
