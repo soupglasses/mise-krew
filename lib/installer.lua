@@ -7,6 +7,34 @@ local function basename(path)
     return path:match("[^/]+$") or path
 end
 
+local function normalize_archive_path(path)
+    if type(path) ~= "string" or path == "" or path:sub(1, 1) == "/" then
+        return nil
+    end
+
+    local parts = {}
+    for part in path:gmatch("[^/]+") do
+        if part == ".." then
+            return nil
+        elseif part ~= "." then
+            table.insert(parts, part)
+        end
+    end
+
+    if #parts == 0 then
+        return nil
+    end
+
+    return table.concat(parts, "/")
+end
+
+local function normalize_archive_pattern(pattern)
+    if type(pattern) ~= "string" then
+        return nil
+    end
+    return normalize_archive_path(pattern:gsub("^/+", ""))
+end
+
 -- kubectl invokes `foo-bar` plugins as `kubectl foo bar` unless the binary is
 -- named with underscores. Mirrors krew's pluginNameToBin.
 function M.target_bin_name(tool)
@@ -160,21 +188,34 @@ end
 
 function M.install_files(platform, source_dir, install_path)
     local file = require("file")
-    local cmd = require("cmd")
 
     if platform.files and #platform.files > 0 then
+        local cmd = require("cmd")
         local any_copied = false
 
         for _, mapping in ipairs(platform.files) do
-            local from_pattern = mapping.from
+            local from_pattern = normalize_archive_pattern(mapping.from)
             local to_path = mapping.to
 
+            if not from_pattern then
+                return nil, "Invalid archive-relative source path: " .. tostring(mapping.from)
+            end
+            if to_path ~= "." then
+                to_path = normalize_archive_path(to_path)
+                if not to_path then
+                    return nil, "Invalid install-relative destination path: " .. tostring(mapping.to)
+                end
+            end
+
             if from_pattern:match("%*") then
-                local find_cmd_str =
-                    string.format("find '%s' -path '%s/%s' -type f", source_dir, source_dir, from_pattern)
-                local ok, found_files = pcall(cmd.exec, find_cmd_str)
+                local glob_cmd_str = string.format(
+                    "for path in '%s'/%s; do [ -e \"$path\" ] && printf '%%s\\n' \"$path\"; done",
+                    source_dir,
+                    from_pattern
+                )
+                local ok, found_files = pcall(cmd.exec, glob_cmd_str)
                 if not ok then
-                    print("WARNING: find failed for pattern: " .. from_pattern)
+                    print("WARNING: glob failed for pattern: " .. from_pattern)
                     found_files = ""
                 end
 
@@ -182,20 +223,13 @@ function M.install_files(platform, source_dir, install_path)
                     found_file = found_file:gsub("%s+$", "")
                     if found_file ~= "" then
                         local relative = found_file:sub(#source_dir + 2)
-                        local target
+                        local destination_dir = to_path == "." and install_path or file.join_path(install_path, to_path)
+                        os.execute("mkdir -p '" .. destination_dir .. "'")
+                        local target = file.join_path(destination_dir, basename(relative))
 
-                        if to_path == "." then
-                            target = file.join_path(install_path, basename(relative))
-                        else
-                            target = file.join_path(install_path, to_path)
-                        end
-
-                        local cp_ok = os.execute(string.format("cp '%s' '%s'", found_file, target))
+                        local cp_ok = os.execute(string.format("cp -R '%s' '%s'", found_file, target))
                         if cp_ok then
                             any_copied = true
-                            if platform.bin and basename(relative) == platform.bin then
-                                M.make_executable(target)
-                            end
                         else
                             print("WARNING: Failed to copy: " .. found_file)
                         end
@@ -214,15 +248,11 @@ function M.install_files(platform, source_dir, install_path)
                         os.execute("mkdir -p '" .. target_dir .. "'")
                     end
 
-                    local cp_ok = os.execute(string.format("cp '%s' '%s'", source, target))
+                    local cp_ok = os.execute(string.format("cp -R '%s' '%s'", source, target))
                     if not cp_ok then
                         return nil, "Failed to copy: " .. from_pattern
                     end
                     any_copied = true
-
-                    if platform.bin and basename(from_pattern) == platform.bin then
-                        M.make_executable(target)
-                    end
                 else
                     print("WARNING: Source not found: " .. source)
                 end
@@ -232,25 +262,55 @@ function M.install_files(platform, source_dir, install_path)
         if not any_copied then
             return nil, "No files were installed from files[] mappings"
         end
+
+        local bin_path = normalize_archive_path(platform.bin)
+        if not bin_path then
+            return nil, "Invalid install-relative bin path: " .. tostring(platform.bin)
+        end
+
+        local installed_bin = file.join_path(install_path, bin_path)
+        if not file.exists(installed_bin) then
+            return nil, "Binary not found after files[] mappings: " .. platform.bin
+        end
+        M.make_executable(installed_bin)
+
+        if bin_path:find("/", 1, true) then
+            local root_bin = file.join_path(install_path, basename(bin_path))
+            local cp_ok = os.execute(string.format("cp '%s' '%s'", installed_bin, root_bin))
+            if not cp_ok then
+                return nil, "Failed to copy mapped binary into install root"
+            end
+            M.make_executable(root_bin)
+        end
     else
-        local bin_name = platform.bin
-        if not bin_name then
+        local bin_path = platform.bin
+        if not bin_path then
             return nil, "No bin specified in platform"
         end
 
-        local find_cmd_str = string.format("find '%s' -name '%s' -type f", source_dir, bin_name)
-        local ok, found_binary = pcall(cmd.exec, find_cmd_str)
-        if not ok or not found_binary or found_binary == "" then
-            return nil, "Binary not found in archive: " .. bin_name
+        local relative_path = normalize_archive_path(bin_path)
+        if not relative_path then
+            return nil, "Invalid archive-relative bin path: " .. tostring(bin_path)
         end
 
-        found_binary = found_binary:match("[^\r\n]+")
-        if not found_binary then
-            return nil, "Binary not found in archive: " .. bin_name
+        local found_binary = file.join_path(source_dir, relative_path)
+        if not file.exists(found_binary) and not relative_path:find("/", 1, true) then
+            local cmd = require("cmd")
+            local find_cmd_str = string.format("find '%s' -name '%s' -type f", source_dir, relative_path)
+            local ok, result = pcall(cmd.exec, find_cmd_str)
+            if ok and result then
+                found_binary = result:match("[^\r\n]+")
+                if found_binary then
+                    found_binary = found_binary:gsub("%s+$", "")
+                end
+            end
         end
-        found_binary = found_binary:gsub("%s+$", "")
 
-        local target = file.join_path(install_path, bin_name)
+        if not found_binary or found_binary == "" or not file.exists(found_binary) then
+            return nil, "Binary not found in archive: " .. bin_path
+        end
+
+        local target = file.join_path(install_path, basename(relative_path))
 
         local cp_ok = os.execute(string.format("cp '%s' '%s'", found_binary, target))
         if not cp_ok then
