@@ -3,6 +3,7 @@
 package.path = package.path .. ";./lib/?.lua"
 
 local plugin_path, repo_url, command_log = ...
+local fail_canonical_update = os.getenv("MISE_KREW_FAIL_CANONICAL_UPDATE") == "1"
 
 local function quote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
@@ -37,6 +38,10 @@ local cmd = {
             local log = assert(io.open(command_log, "a"))
             log:write(command, "\n")
             log:close()
+        end
+
+        if fail_canonical_update and command:find("update-ref 'refs/remotes/origin/master'", 1, true) then
+            error("injected canonical update-ref failure")
         end
 
         if options and options.cwd then

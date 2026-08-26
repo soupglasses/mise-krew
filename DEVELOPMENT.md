@@ -163,11 +163,12 @@ Bootstrap separates repository publication from readiness:
    the advisory bootstrap lease and normally performs the only full-history
    download.
 3. The winner fetches into `refs/mise-krew/candidates/<token>`, prepares a loose
-   canonical ref, and publishes it with a same-filesystem hard link. This atomic
-   create-if-absent operation has no fixed bootstrap lockfile for a killed
-   process to strand. Recovery retires any canonical lock left by an older
-   publisher before declaring readiness. The canonical ref, not the directory,
-   marks the repository ready.
+   canonical ref, and prefers to publish it with a same-filesystem hard link.
+   This atomic create-if-absent operation has no fixed bootstrap lockfile for a
+   killed process to strand. If hard links or `ln` are unavailable, Git's
+   create-only `update-ref` compare-and-swap publishes it instead. Recovery
+   retires any canonical lock left by an older publisher before declaring
+   readiness. The canonical ref, not the directory, marks the repository ready.
 4. Waiters replace an expired lease using Git compare-and-swap. A killed fetch
    can strand only its unique candidate state, so the replacement fetch remains
    unblocked. A stranded lease lock is retired once, and each waiter attempts a

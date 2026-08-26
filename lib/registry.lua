@@ -93,9 +93,9 @@ local function unique_token()
 end
 
 -- Git command wrapper
-local function git(args, cwd)
+local function git(args, cwd, environment)
     local cmd = require("cmd")
-    local command = "git -c core.fsmonitor=false " .. args
+    local command = (environment and environment .. " " or "") .. "git -c core.fsmonitor=false " .. args
     local ok, result
     if cwd then
         ok, result = pcall(cmd.exec, command, { cwd = cwd })
@@ -181,16 +181,31 @@ local function create_private_repository()
     local registry_path = M.get_registry_path()
     local temp_path = registry_path .. ".incomplete." .. unique_token()
     local init_args = table.concat({
+        "-c init.defaultObjectFormat=" .. M.OBJECT_FORMAT,
         "-c init.defaultRefFormat=files",
         "init",
         "--quiet",
-        "--object-format=" .. M.OBJECT_FORMAT,
         quote(temp_path),
     }, " ")
-    local _, init_err = git(init_args)
+    -- Older Git releases do not support `git init --object-format`, but default
+    -- to SHA-1 and safely ignore both the newer config key and environment
+    -- variable. On newer Git the scoped environment also overrides a hostile
+    -- inherited GIT_DEFAULT_HASH value.
+    local init_environment = "GIT_DEFAULT_HASH=" .. quote(M.OBJECT_FORMAT)
+    local _, init_err = git(init_args, nil, init_environment)
     if init_err then
         shell("rm -rf " .. quote(temp_path))
         return nil, "Failed to initialize registry: " .. init_err
+    end
+
+    local object_format = git("config --get extensions.objectFormat", temp_path)
+    object_format = object_format and object_format:gsub("%s+$", "") or M.OBJECT_FORMAT
+    if object_format == "" then
+        object_format = M.OBJECT_FORMAT
+    end
+    if object_format ~= M.OBJECT_FORMAT then
+        shell("rm -rf " .. quote(temp_path))
+        return nil, "Registry requires Git's " .. M.OBJECT_FORMAT .. " object format, got: " .. object_format
     end
 
     local ref_format = git("config --get extensions.refStorage", temp_path)
@@ -260,14 +275,13 @@ end
 
 local function fetch_ref(registry_path, destination_ref)
     local fetch_args = table.concat({
+        "-c fetch.writeCommitGraph=false",
+        "-c maintenance.auto=false",
+        "-c gc.auto=0",
         "fetch",
         "--quiet",
-        "--atomic",
         "--no-tags",
         "--no-recurse-submodules",
-        "--no-write-fetch-head",
-        "--no-write-commit-graph",
-        "--no-auto-maintenance",
         "origin",
         "+refs/heads/master:" .. destination_ref,
     }, " ")
@@ -360,13 +374,28 @@ local function publish_initial_ref(registry_path, candidate_oid, token)
     -- strand in the already-published empty repository.
     local published = shell("ln " .. quote(candidate_path) .. " " .. quote(ref_path) .. " 2>/dev/null")
     os.remove(candidate_path)
-    if published then
+    if published and M.exists() then
         return true, nil
     end
     if M.exists() then
         return false, nil
     end
-    return nil, "Failed to publish initial registry ref: " .. ref_path
+
+    -- Some filesystems do not support hard links and some hosts do not provide
+    -- an external `ln`. Fall back to Git's atomic create-only ref transaction.
+    -- A SIGKILL can strand its fixed lockfile, but lease recovery retires that
+    -- lock before the next candidate publishes.
+    local _, update_err = git(
+        "update-ref " .. quote(M.REGISTRY_REF) .. " " .. quote(candidate_oid) .. " " .. quote(ZERO_OID),
+        registry_path
+    )
+    if not update_err then
+        return true, nil
+    end
+    if M.exists() then
+        return false, nil
+    end
+    return nil, "Failed to publish initial registry ref: " .. update_err
 end
 
 local function publish_bootstrap_candidate(registry_path, lease)

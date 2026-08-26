@@ -29,6 +29,7 @@ seed="$test_root/seed"
 plugin="$test_root/plugin"
 command_log="$test_root/commands.log"
 hostile_config="$test_root/hostile.gitconfig"
+failed_link_bin="$test_root/failed-link-bin"
 
 git -c core.fsmonitor=false init --bare "$remote" >/dev/null
 git -c core.fsmonitor=false init -b master "$seed" >/dev/null
@@ -36,6 +37,8 @@ git -C "$seed" -c core.fsmonitor=false config user.name test
 git -C "$seed" -c core.fsmonitor=false config user.email test@example.invalid
 git -C "$seed" -c core.fsmonitor=false remote add origin "$remote"
 mkdir -p "$seed/plugins" "$plugin"
+mkdir -p "$failed_link_bin"
+ln -s /usr/bin/false "$failed_link_bin/ln"
 printf 'metadata:\n  name: demo\nspec:\n  version: v1.0.0\n' >"$seed/plugins/demo.yaml"
 git -C "$seed" -c core.fsmonitor=false add plugins/demo.yaml
 git -C "$seed" -c commit.gpgsign=false -c core.fsmonitor=false commit -m initial >/dev/null
@@ -98,6 +101,14 @@ if git -C "$plugin/registry" -c core.fsmonitor=false config --get-all remote.ori
 fi
 if [[ $(git -C "$plugin/registry" -c core.fsmonitor=false config --get extensions.refStorage || true) == reftable ]]; then
     echo "bootstrap repository inherited the hostile reftable default" >&2
+    exit 1
+fi
+if [[ $(git -C "$plugin/registry" -c core.fsmonitor=false rev-parse --show-object-format) != sha1 ]]; then
+    echo "bootstrap repository inherited the hostile SHA-256 default" >&2
+    exit 1
+fi
+if grep -Eq -- '--object-format|--atomic|--no-write-fetch-head|--no-auto-maintenance' "$command_log"; then
+    echo "bootstrap used a Git option unavailable on older supported clients" >&2
     exit 1
 fi
 if git -C "$plugin/registry" -c core.fsmonitor=false for-each-ref --format='%(refname)' refs/mise-krew | grep -q .; then
@@ -287,7 +298,8 @@ for i in {1..16}; do
     recovery_logs+=("$test_root/bootstrap-recovery-$i.log")
     (
         cd "$repo_root"
-        GIT_CONFIG_GLOBAL="$hostile_config" \
+        PATH="$failed_link_bin:$PATH" \
+            GIT_CONFIG_GLOBAL="$hostile_config" \
             GIT_DEFAULT_HASH=sha256 \
             MISE_KREW_BOOTSTRAP_LEASE_SECONDS=1 \
             MISE_KREW_BOOTSTRAP_TIMEOUT_SECONDS=5 \
@@ -310,6 +322,11 @@ fi
 lease_object_count=$(grep -c ' hash-object -w ' "$bootstrap_log")
 if [[ "$lease_object_count" -gt 17 ]]; then
     echo "bootstrap recovery created $lease_object_count lease objects for 16 waiters" >&2
+    exit 1
+fi
+bootstrap_fallback_count=$(grep -c " update-ref 'refs/remotes/origin/master'" "$bootstrap_log")
+if [[ "$bootstrap_fallback_count" -ne 1 ]]; then
+    echo "expected one Git CAS publication during hard-link-free recovery, saw $bootstrap_fallback_count" >&2
     exit 1
 fi
 expected=$(git -C "$seed" -c core.fsmonitor=false rev-parse HEAD)
@@ -344,22 +361,48 @@ if [[ "$actual" != "$expected" ]]; then
     exit 1
 fi
 
-# A failure after fetching but before canonical ref publication must release its
-# exact lease generation. Otherwise the next initializer waits five minutes for
-# a publisher that has already returned an error.
+# Filesystems without hard-link support, and hosts without a working `ln`, must
+# fall back to Git's atomic create-only ref update without repeating the fetch.
+no_link_plugin="$test_root/no-link-plugin"
+no_link_log="$test_root/no-link-commands.log"
 failed_publish_plugin="$test_root/failed-publish-plugin"
 failed_publish_log="$test_root/failed-publish-commands.log"
-failed_link_bin="$test_root/failed-link-bin"
-mkdir -p "$failed_publish_plugin" "$failed_link_bin"
-ln -s /usr/bin/false "$failed_link_bin/ln"
+mkdir -p "$no_link_plugin" "$failed_publish_plugin"
+(
+    cd "$repo_root"
+    PATH="$failed_link_bin:$PATH" \
+        GIT_CONFIG_GLOBAL="$hostile_config" \
+        GIT_DEFAULT_HASH=sha256 \
+        lua tests/registry_worker.lua "$no_link_plugin" "$remote" "$no_link_log"
+) >"$test_root/no-link.log" 2>&1
+expected=$(git -C "$seed" -c core.fsmonitor=false rev-parse HEAD)
+actual=$(git -C "$no_link_plugin/registry" -c core.fsmonitor=false rev-parse refs/remotes/origin/master)
+if [[ "$actual" != "$expected" ]]; then
+    cat "$test_root/no-link.log"
+    echo "Git CAS fallback did not publish the remote tip" >&2
+    exit 1
+fi
+if [[ $(grep -c " update-ref 'refs/remotes/origin/master'" "$no_link_log") -ne 1 ]]; then
+    echo "bootstrap did not use exactly one Git CAS publication fallback" >&2
+    exit 1
+fi
+if [[ $(grep -c ' fetch .*refs/mise-krew/candidates/' "$no_link_log") -ne 1 ]]; then
+    echo "hard-link fallback repeated the bootstrap fetch" >&2
+    exit 1
+fi
+
+# If both publication mechanisms fail, release the exact lease generation.
+# Otherwise the next initializer waits five minutes for a publisher that has
+# already returned an error.
 if (
     cd "$repo_root"
     PATH="$failed_link_bin:$PATH" \
         GIT_CONFIG_GLOBAL="$hostile_config" \
         GIT_DEFAULT_HASH=sha256 \
+        MISE_KREW_FAIL_CANONICAL_UPDATE=1 \
         lua tests/registry_worker.lua "$failed_publish_plugin" "$remote" "$failed_publish_log"
 ) >"$test_root/failed-publish.log" 2>&1; then
-    echo "bootstrap unexpectedly succeeded when canonical publication failed" >&2
+    echo "bootstrap unexpectedly succeeded when both publication mechanisms failed" >&2
     exit 1
 fi
 if git -C "$failed_publish_plugin/registry" -c core.fsmonitor=false rev-parse --verify \
