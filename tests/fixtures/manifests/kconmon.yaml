@@ -1,0 +1,22 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: kconmon
+spec:
+  version: v2.0.3
+  platforms:
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    uri: https://github.com/EsDmitrii/kconmon-ng/releases/download/v2.0.3/kconmon_2.0.3_linux_amd64.tar.gz
+    sha256: 11597eb84196924b6342d046a836082ac84c1dde668297af4e68b54b3056be47
+    bin: kubectl-kconmon
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    uri: "https://github.com/EsDmitrii/kconmon-ng/releases/download/\
+      v2.0.3/kconmon_2.0.3_darwin_amd64.tar.gz"
+    sha256: a6cd9ee555eeb101172dd22d75694c90b7d4e0aa52f42e34311a4a4ee433c212
+    bin: kubectl-kconmon

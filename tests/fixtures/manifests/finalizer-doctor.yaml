@@ -1,0 +1,21 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: finalizer-doctor
+spec:
+  version: v0.1.1
+  homepage: https://github.com/alexremn/finalizer-doctor
+  shortDescription: Safely diagnose and clear stuck finalizers
+  description: 'Pinpoints the finalizer and the dead controller blocking deletion, cleans
+    truly-orphaned resources first, and clears finalizers only as a gated last resort. Dry-run and explain
+    by default.
+
+    '
+  platforms:
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    uri: https://example.com/finalizer-doctor.tar.gz
+    sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    bin: kubectl-finalizer_doctor

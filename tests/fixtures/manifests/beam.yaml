@@ -1,0 +1,13 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: beam
+spec:
+  version: v0.1.0
+  platforms:
+  - selector:
+      matchExpressions:
+      - {key: os, operator: In, values: [darwin, linux]}
+    uri: https://github.com/codeadict/kubectl-beam/releases/download/v0.1.0/kubectl-beam.tar.gz
+    sha256: 064957862d8a927351c49c7581f7de0e623d6c3323e71b904391f7aeb9e52a72
+    bin: kubectl-beam
