@@ -60,9 +60,17 @@ git config --file "$hostile_config" pull.rebase true
 # A process killed during its private fetch can leave a ref lock behind. That
 # candidate must never block another process from publishing a complete clone.
 abandoned_registry="$plugin/registry.incomplete.abandoned"
-git -c core.fsmonitor=false init --quiet --object-format=sha1 "$abandoned_registry"
+GIT_DEFAULT_HASH=sha1 GIT_DEFAULT_REF_FORMAT=files \
+    git -c core.fsmonitor=false \
+    -c init.defaultObjectFormat=sha1 \
+    -c init.defaultRefFormat=files \
+    init --quiet "$abandoned_registry"
 mkdir -p "$abandoned_registry/.git/refs/remotes/origin"
 touch "$abandoned_registry/.git/refs/remotes/origin/master.lock"
+
+# Modern Git gives these environment variables precedence over configuration.
+# Production must scope both formats while older Git safely ignores them.
+export GIT_DEFAULT_REF_FORMAT=reftable
 
 run_workers() {
     local phase=$1
@@ -74,7 +82,8 @@ run_workers() {
         logs+=("$test_root/$phase-$i.log")
         (
             cd "$repo_root"
-            GIT_CONFIG_GLOBAL="$hostile_config" GIT_DEFAULT_HASH=sha256 \
+            GIT_CONFIG_GLOBAL="$hostile_config" \
+                GIT_DEFAULT_HASH=sha256 \
                 lua tests/registry_worker.lua "$plugin" "$remote" "$command_log"
         ) >"$test_root/$phase-$i.log" 2>&1 &
         pids+=("$!")

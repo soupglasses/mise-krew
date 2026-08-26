@@ -29,6 +29,7 @@ M.REGISTRY_REF = "refs/remotes/origin/master"
 M.BOOTSTRAP_LEASE_REF = "refs/mise-krew/bootstrap"
 M.BOOTSTRAP_CANDIDATE_PREFIX = "refs/mise-krew/candidates/"
 M.OBJECT_FORMAT = "sha1"
+M.REF_FORMAT = "files"
 M.STAMP_FILE = ".git/mise-krew-last-fetch"
 M.CACHE_TTL_SECONDS = 86400 -- 24 hours
 M.FETCH_RETRIES = 10
@@ -92,10 +93,30 @@ local function unique_token()
     return temp_path:gsub("[^%w]", "") .. tostring(os.time())
 end
 
+local function environment_prefix(environment)
+    if not environment then
+        return "", nil
+    end
+
+    local assignments = {}
+    for name, value in pairs(environment) do
+        if not name:match("^[A-Z_][A-Z0-9_]*$") then
+            return nil, "Invalid environment variable name: " .. tostring(name)
+        end
+        table.insert(assignments, name .. "=" .. quote(value))
+    end
+    table.sort(assignments)
+    return table.concat(assignments, " ") .. " ", nil
+end
+
 -- Git command wrapper
 local function git(args, cwd, environment)
     local cmd = require("cmd")
-    local command = (environment and environment .. " " or "") .. "git -c core.fsmonitor=false " .. args
+    local prefix, prefix_err = environment_prefix(environment)
+    if not prefix then
+        return nil, prefix_err
+    end
+    local command = prefix .. "git -c core.fsmonitor=false " .. args
     local ok, result
     if cwd then
         ok, result = pcall(cmd.exec, command, { cwd = cwd })
@@ -182,16 +203,19 @@ local function create_private_repository()
     local temp_path = registry_path .. ".incomplete." .. unique_token()
     local init_args = table.concat({
         "-c init.defaultObjectFormat=" .. M.OBJECT_FORMAT,
-        "-c init.defaultRefFormat=files",
+        "-c init.defaultRefFormat=" .. M.REF_FORMAT,
         "init",
         "--quiet",
         quote(temp_path),
     }, " ")
     -- Older Git releases do not support `git init --object-format`, but default
     -- to SHA-1 and safely ignore both the newer config key and environment
-    -- variable. On newer Git the scoped environment also overrides a hostile
-    -- inherited GIT_DEFAULT_HASH value.
-    local init_environment = "GIT_DEFAULT_HASH=" .. quote(M.OBJECT_FORMAT)
+    -- variables. On newer Git the scoped environment also overrides hostile
+    -- inherited object and ref format values.
+    local init_environment = {
+        GIT_DEFAULT_HASH = M.OBJECT_FORMAT,
+        GIT_DEFAULT_REF_FORMAT = M.REF_FORMAT,
+    }
     local _, init_err = git(init_args, nil, init_environment)
     if init_err then
         shell("rm -rf " .. quote(temp_path))
@@ -209,10 +233,10 @@ local function create_private_repository()
     end
 
     local ref_format = git("config --get extensions.refStorage", temp_path)
-    ref_format = ref_format and ref_format:gsub("%s+$", "") or "files"
-    if ref_format ~= "" and ref_format ~= "files" then
+    ref_format = ref_format and ref_format:gsub("%s+$", "") or M.REF_FORMAT
+    if ref_format ~= "" and ref_format ~= M.REF_FORMAT then
         shell("rm -rf " .. quote(temp_path))
-        return nil, "Registry requires Git's files ref format, got: " .. ref_format
+        return nil, "Registry requires Git's " .. M.REF_FORMAT .. " ref format, got: " .. ref_format
     end
 
     -- Configure only the URL. `git remote add` also installs a default fetch
