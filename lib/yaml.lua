@@ -350,8 +350,19 @@ function Parser:parseblockstylestring(line, lines, indent)
   if #lines == 0 then
     error("failed to find multi-line scalar content")
   end
+
+  local style, chomping, indentation = smatch(line, '^([|>])([%+%-]?)([1-9]?)$')
+  if not style then
+    style, indentation, chomping = smatch(line, '^([|>])([1-9])([%+%-]?)$')
+  end
+  if not style then
+    error('invalid blockstyle string:'..line)
+  end
+  indentation = tonumber(indentation)
+
   local s = {}
   local firstindent = -1
+  local contentindent = indentation and indent + indentation
   local endline = -1
   for i = 1, #lines do
     local ln = lines[i]
@@ -362,7 +373,11 @@ function Parser:parseblockstylestring(line, lines, indent)
     if ln == '' then
       tinsert(s, '')
     else
-      if firstindent == -1 then
+      if contentindent and idt < contentindent then
+        break
+      elseif contentindent then
+        firstindent = contentindent
+      elseif firstindent == -1 then
         firstindent = idt
       elseif idt < firstindent then
         break
@@ -372,36 +387,9 @@ function Parser:parseblockstylestring(line, lines, indent)
     endline = i
   end
 
-  local striptrailing = true
-  local sep = '\n'
-  local newlineatend = true
-  if line == '|' then
-    striptrailing = true
-    sep = '\n'
-    newlineatend = true
-  elseif line == '|+' then
-    striptrailing = false
-    sep = '\n'
-    newlineatend = true
-  elseif line == '|-' then
-    striptrailing = true
-    sep = '\n'
-    newlineatend = false
-  elseif line == '>' then
-    striptrailing = true
-    sep = ' '
-    newlineatend = true
-  elseif line == '>+' then
-    striptrailing = false
-    sep = ' '
-    newlineatend = true
-  elseif line == '>-' then
-    striptrailing = true
-    sep = ' '
-    newlineatend = false
-  else
-    error('invalid blockstyle string:'..line)
-  end
+  local striptrailing = chomping ~= '+'
+  local sep = style == '|' and '\n' or ' '
+  local newlineatend = chomping ~= '-'
 
   if #s == 0 then
     return ""

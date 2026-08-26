@@ -99,6 +99,18 @@ M.test("volsync v0.15.0: platform after multiline description", function()
     M.assert_equals(platform.bin, "kubectl-volsync", "bin mismatch")
 end)
 
+M.test("view-secret: parse explicit block scalar indentation", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("view-secret"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+    M.assert_equals(result.version, "v0.16.0", "version mismatch")
+    M.assert_equals(#result.platforms, 2, "expected platforms after description block")
+
+    local platform, platform_err = manifest.select_platform(result, "linux", "amd64")
+    M.assert_not_nil(platform, "Platform selection failed: " .. tostring(platform_err))
+    M.assert_equals(platform.bin, "kubectl-view-secret", "bin mismatch")
+end)
+
 M.test("platform selection: unsupported platform", function()
     local manifest = require("manifest")
     local result, parse_err = manifest.parse(M.load_fixture("browse-pvc"))
