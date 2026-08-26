@@ -136,14 +136,54 @@ The plugin uses a two-level caching system to avoid expensive git operations on 
 ### Cache Levels
 
 1. **Git Registry Cache** (`registry/`)
-   - Full clone of `kubernetes-sigs/krew-index`
+   - Full-history mirror of `kubernetes-sigs/krew-index`
    - Updated if last fetch was >24 hours ago (`registry.CACHE_TTL_SECONDS`)
    - Trigger: `registry.ensure_fresh()` called at the start of every operation
+   - Uses **optimistic parallelism**: initialization publishes an empty Git
+     repository atomically, coalesces the expensive first fetch with an
+     advisory lease, and publishes the result with atomic create-if-absent.
+     Reads are pinned to a captured commit, so concurrent updates never expose
+     partially fetched history.
 
 2. **Version Index Cache** (`cache/<tool>.json`)
    - Per-tool version lists with commit mappings
    - Built by walking git history and parsing each manifest version
    - Stored as JSON with schema version for compatibility
+
+### Registry Optimistic Parallelism
+
+Bootstrap separates repository publication from readiness:
+
+1. Each process prepares an empty Git repository in its own
+   `registry.incomplete.<token>` directory. Its object and ref formats are pinned
+   to SHA-1 and `files`, and only `remote.origin.url` is configured. Hostile Git
+   defaults therefore cannot make loose-ref publication invisible or install a
+   fetch refspec that bypasses candidate publication.
+2. Atomic rename publishes one empty repository as `registry`; that winner owns
+   the advisory bootstrap lease and normally performs the only full-history
+   download.
+3. The winner fetches into `refs/mise-krew/candidates/<token>`, prepares a loose
+   canonical ref, and prefers to publish it with a same-filesystem hard link.
+   This atomic create-if-absent operation has no fixed bootstrap lockfile for a
+   killed process to strand. If hard links or `ln` are unavailable, Git's
+   create-only `update-ref` compare-and-swap publishes it instead. Recovery
+   retires any canonical lock left by an older publisher before declaring
+   readiness. The canonical ref, not the directory, marks the repository ready.
+4. Waiters replace an expired lease using Git compare-and-swap. A killed fetch
+   can strand only its unique candidate state, so the replacement fetch remains
+   unblocked. A stranded lease lock is retired once, and each waiter attempts a
+   particular lease generation at most once, bounding recovery work. The lease
+   remains only a download-coalescing optimization: after the recovery deadline,
+   callers may bypass it while candidate isolation and atomic canonical
+   publication continue to preserve correctness.
+
+Refresh fetches only `refs/remotes/origin/master`; Git atomically publishes the
+ref after its objects are available. Ref publication compares against the value
+observed when the fetch began, so a stale fetch cannot overwrite a concurrent
+winner; it fails and retries against the current remote tip. Each reader
+captures the ref's commit once and uses that commit for its complete operation.
+Consequently, readers see either the old snapshot or the new snapshot, never a
+partially updated worktree.
 
 ### Cache Invalidation Triggers
 
@@ -154,8 +194,8 @@ The version index cache is rebuilt when ANY of these conditions are met:
 | **Cache file missing** | `load_cached()` | First run for this tool |
 | **Schema version mismatch** | `load_cached()` | Plugin updated, old cache incompatible |
 | **TTL expired (24h)** | `load_cached()` | `os.time() - cache.generated_at > 86400` |
-| **Registry HEAD changed** | `load_cached()` | krew-index has new commits |
-| **Registry stale (24h)** | `refresh_if_stale()` | Git fetch needed before building index |
+| **Registry ref changed** | `load_cached()` | krew-index has new commits |
+| **Registry stale (24h)** | `ensure_fresh()` | Git fetch needed before building index |
 
 ### Cache Flow
 

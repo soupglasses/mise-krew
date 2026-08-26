@@ -19,7 +19,10 @@ run = "hk check"
 
 [tasks.test-unit]
 description = "Run Lua unit tests"
-run = "lua tests/run_tests.lua"
+run = [
+    "lua tests/run_tests.lua",
+    "bash tests/test_registry_concurrency.sh",
+]
 
 [tasks.test-integration]
 description = "Run integration tests against the linked backend plugin"
