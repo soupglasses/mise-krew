@@ -243,7 +243,7 @@ Commits follow the [Conventional Commits](https://www.conventionalcommits.org) f
 3. Tag and publish (no `v` prefix):
 
    ```bash
-   git tag -a X.Y.Z -m "Release X.Y.Z"
+   git tag -s -a X.Y.Z -m "Release X.Y.Z"
    git push origin X.Y.Z
    gh release create X.Y.Z --title X.Y.Z --generate-notes
    ```
