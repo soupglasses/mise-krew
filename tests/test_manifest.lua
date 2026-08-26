@@ -111,6 +111,79 @@ M.test("view-secret: parse explicit block scalar indentation", function()
     M.assert_equals(platform.bin, "kubectl-view-secret", "bin mismatch")
 end)
 
+M.test("beam: parse compact flow mapping in sequence", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("beam"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+
+    local platform, platform_err = manifest.select_platform(result, "linux", "amd64")
+    M.assert_not_nil(platform, "Platform selection failed: " .. tostring(platform_err))
+    M.assert_equals(platform.bin, "kubectl-beam", "bin mismatch")
+end)
+
+M.test("custom-cols: parse spaced flow mapping in sequence", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("custom-cols"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+
+    local platform, platform_err = manifest.select_platform(result, "darwin", "amd64")
+    M.assert_not_nil(platform, "Platform selection failed: " .. tostring(platform_err))
+    M.assert_equals(platform.bin, "./kubectl-custom-cols", "bin mismatch")
+end)
+
+M.test("kconmon: parse escaped quoted scalar continuation", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("kconmon"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+
+    local platform, platform_err = manifest.select_platform(result, "darwin", "amd64")
+    M.assert_not_nil(platform, "Platform selection failed: " .. tostring(platform_err))
+    M.assert_equals(
+        platform.uri,
+        "https://github.com/EsDmitrii/kconmon-ng/releases/download/v2.0.3/kconmon_2.0.3_darwin_amd64.tar.gz",
+        "uri mismatch"
+    )
+end)
+
+M.test("resource-snapshot: parse stripped block scalar after sequence", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("resource-snapshot"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+    M.assert_equals(result.version, "v0.1.3", "version mismatch")
+    M.assert_equals(#result.platforms, 1, "platform count mismatch")
+    M.assert_equals(
+        result.shortDescription,
+        "Prints a snapshot of nodes, pods and HPAs resource usage",
+        "short description mismatch"
+    )
+end)
+
+M.test("finalizer-doctor: parse multiline single-quoted scalar", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("finalizer-doctor"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+    M.assert_equals(result.version, "v0.1.1", "version mismatch")
+    M.assert_equals(
+        result.description,
+        "Pinpoints the finalizer and the dead controller blocking deletion, cleans "
+            .. "truly-orphaned resources first, and clears finalizers only as a gated last resort. "
+            .. "Dry-run and explain by default.\n",
+        "description mismatch"
+    )
+end)
+
+M.test("view-serviceaccount-kubeconfig: parse multiline plain scalar", function()
+    local manifest = require("manifest")
+    local result, parse_err = manifest.parse(M.load_fixture("view-serviceaccount-kubeconfig"))
+    M.assert_not_nil(result, "Parse failed: " .. tostring(parse_err))
+    M.assert_equals(result.version, "v2.2.8", "version mismatch")
+    M.assert_equals(
+        result.shortDescription,
+        "Show a kubeconfig setting to access the apiserver with a specified serviceaccount.",
+        "short description mismatch"
+    )
+end)
+
 M.test("platform selection: unsupported platform", function()
     local manifest = require("manifest")
     local result, parse_err = manifest.parse(M.load_fixture("browse-pvc"))

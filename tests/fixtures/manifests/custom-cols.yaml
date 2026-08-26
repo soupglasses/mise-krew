@@ -1,0 +1,13 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: custom-cols
+spec:
+  version: v0.1.2
+  platforms:
+  - selector:
+      matchExpressions:
+      - { key: os, operator: In, values: [darwin, linux] }
+    uri: https://github.com/webofmars/kubectl-custom-cols/archive/refs/tags/v0.1.2.tar.gz
+    sha256: f29156b636fdf89bacc17ad7a7bfd8e60033bbea14b17ed3def5279b50c8f489
+    bin: ./kubectl-custom-cols
