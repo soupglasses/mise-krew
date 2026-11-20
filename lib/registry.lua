@@ -305,6 +305,8 @@ local function fetch_ref(registry_path, destination_ref)
         "-c fetch.recurseSubmodules=false",
         "-c maintenance.auto=false",
         "-c gc.auto=0",
+        "-c http.lowSpeedLimit=1000",
+        "-c http.lowSpeedTime=30",
         "fetch",
         "--quiet",
         "--no-tags",
