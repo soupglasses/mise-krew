@@ -350,8 +350,19 @@ function Parser:parseblockstylestring(line, lines, indent)
   if #lines == 0 then
     error("failed to find multi-line scalar content")
   end
+
+  local style, chomping, indentation = smatch(line, '^([|>])([%+%-]?)([1-9]?)$')
+  if not style then
+    style, indentation, chomping = smatch(line, '^([|>])([1-9])([%+%-]?)$')
+  end
+  if not style then
+    error('invalid blockstyle string:'..line)
+  end
+  indentation = tonumber(indentation)
+
   local s = {}
   local firstindent = -1
+  local contentindent = indentation and indent + indentation
   local endline = -1
   for i = 1, #lines do
     local ln = lines[i]
@@ -362,7 +373,11 @@ function Parser:parseblockstylestring(line, lines, indent)
     if ln == '' then
       tinsert(s, '')
     else
-      if firstindent == -1 then
+      if contentindent and idt < contentindent then
+        break
+      elseif contentindent then
+        firstindent = contentindent
+      elseif firstindent == -1 then
         firstindent = idt
       elseif idt < firstindent then
         break
@@ -372,36 +387,9 @@ function Parser:parseblockstylestring(line, lines, indent)
     endline = i
   end
 
-  local striptrailing = true
-  local sep = '\n'
-  local newlineatend = true
-  if line == '|' then
-    striptrailing = true
-    sep = '\n'
-    newlineatend = true
-  elseif line == '|+' then
-    striptrailing = false
-    sep = '\n'
-    newlineatend = true
-  elseif line == '|-' then
-    striptrailing = true
-    sep = '\n'
-    newlineatend = false
-  elseif line == '>' then
-    striptrailing = true
-    sep = ' '
-    newlineatend = true
-  elseif line == '>+' then
-    striptrailing = false
-    sep = ' '
-    newlineatend = true
-  elseif line == '>-' then
-    striptrailing = true
-    sep = ' '
-    newlineatend = false
-  else
-    error('invalid blockstyle string:'..line)
-  end
+  local striptrailing = chomping ~= '+'
+  local sep = style == '|' and '\n' or ' '
+  local newlineatend = chomping ~= '-'
 
   if #s == 0 then
     return ""
@@ -465,6 +453,28 @@ function Parser:parsescalar(line, lines, indent)
   line = gsub(line, '^%s*#.*$', '')  -- comment only -> ''
   line = gsub(line, '^%s*', '')  -- trim head spaces
 
+  local trailing_backslashes = smatch(line, '(\\+)$')
+  while startswith(line, '"') and trailing_backslashes and #trailing_backslashes % 2 == 1 do
+    if #lines == 0 then
+      error('failed to find quoted scalar continuation')
+    end
+    line = ssub(line, 1, -2)..ltrim(tremove(lines, 1))
+    trailing_backslashes = smatch(line, '(\\+)$')
+  end
+
+  if startswith(line, "'") then
+    local quoted = self:parsestring(line)
+    while not quoted do
+      if #lines == 0 or countindent(lines[1]) <= indent then
+        error('failed to find quoted scalar ending')
+      end
+      local continuation = ltrim(tremove(lines, 1))
+      local separator = ssub(line, -1) == '\n' and '' or ' '
+      line = line..separator..continuation
+      quoted = self:parsestring(line)
+    end
+  end
+
   if line == '' or line == '~' then
     return null
   end
@@ -524,7 +534,17 @@ function Parser:parsescalar(line, lines, indent)
   elseif sfind(v, '^[%+%-]?[0-9]+%.[0-9]+$') then
     return tonumber(v)
   end
-  return s or v
+
+  while #lines > 0 do
+    local continuation_indent, continuation = countindent(lines[1])
+    if continuation_indent <= indent then
+      break
+    end
+    tremove(lines, 1)
+    local separator = ssub(v, -1) == '\n' and '' or ' '
+    v = v..separator..trim(continuation)
+  end
+  return v
 end
 
 function Parser:parseseq(line, lines, indent)
@@ -550,16 +570,17 @@ function Parser:parseseq(line, lines, indent)
       error("found bad indenting in line: ".. line)
     end
 
-    local i, j = sfind(line, '%-%s+')
+    local i, j = sfind(line, '^%s*%-%s+')
     if not i then
-      i, j = sfind(line, '%-$')
+      i, j = sfind(line, '^%s*%-$')
       if not i then
         return seq
       end
     end
     local rest = ssub(line, j+1)
 
-    if sfind(rest, '^[^\'\"%s]*:%s*$') or sfind(rest, '^[^\'\"%s]*:%s+.') then
+    if not startswith(rest, '{') and
+       (sfind(rest, '^[^\'\"%s]*:%s*$') or sfind(rest, '^[^\'\"%s]*:%s+.')) then
       -- Inline nested hash
       -- There are two patterns need to match as inline nested hash
       --   first one should have no other characters except whitespace after `:`
@@ -616,7 +637,8 @@ function Parser:parseseq(line, lines, indent)
       local nextline = lines[1]
       local indent2 = countindent(nextline)
       tremove(lines, 1)
-      tinsert(seq, self:parsescalar(rest, lines, indent2))
+      local value = self:parsescalar(rest, lines, indent2)
+      tinsert(seq, value)
     end
   end
   return seq

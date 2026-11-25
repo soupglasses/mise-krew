@@ -1,0 +1,18 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: resource-snapshot
+spec:
+  version: v0.1.3
+  platforms:
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    uri: https://github.com/fbrubbo/kubectl-snapshot/archive/v0.1.3.tar.gz
+    sha256: 24efd80a13dc532e63b34341b6f229e759e995a922a39745d9f40c9ba24d02e8
+    bin: ./kubectl-snapshot-linux-amd64
+
+  shortDescription: >-
+    Prints a snapshot of nodes, pods and HPAs resource usage
+  homepage: https://github.com/fbrubbo/kubectl-snapshot

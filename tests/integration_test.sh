@@ -44,6 +44,7 @@ clean_tool browse-pvc
 
 check "plugin is linked"                          "mise plugin list | grep -q krew"
 check "list remote versions for tree"             "mise ls-remote krew:tree | grep -q 'v0.4'"
+check "parse all current registry manifests"      "lua tests/check_registry_manifests.lua registry"
 check "install krew:tree@latest"                  "mise install krew:tree@latest"
 
 TREE_INSTALL=$(mise where krew:tree@latest)
